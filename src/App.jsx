@@ -4,13 +4,14 @@ import {
 
   Home, FileText, Trophy, Zap, User, Shield, Plus, Trash2, Check, 
 
-  X, Sparkles, Lock, AlertTriangle, MessageSquare, ShoppingBag, 
+  X, Sparkles, AlertTriangle, MessageSquare, ShoppingBag,
 
   CreditCard, Settings, Users, Ban, Gift, Search, Eye, Share2, 
 
   ChevronRight, ArrowLeft, Send, Image as ImageIcon, RefreshCw, 
 
-  Award, Clock, CheckCircle2, HelpCircle, LogOut, Sliders
+  Award, Clock, CheckCircle2, HelpCircle, LogOut, Sliders, Heart, Bird,
+  Flame, Crown, Star, BadgeCheck, Copy
 
 } from 'lucide-react';
 
@@ -120,7 +121,208 @@ const LEVEL_THRESHOLDS = [
 
 ];
 
+const getCurrentWeekKey = (date = new Date()) => {
+  const monday = new Date(date);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const month = String(monday.getMonth() + 1).padStart(2, '0');
+  const day = String(monday.getDate()).padStart(2, '0');
+  return `${monday.getFullYear()}-${month}-${day}`;
+};
 
+const getLocalDateKey = (date = new Date()) => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+const PUBLIC_ID_STORAGE_KEY = 'anoni-public-ids';
+const ADMIN_PUBLIC_ID = '777-777';
+
+const loadReservedPublicIds = () => {
+  let storedIds;
+  try {
+    storedIds = JSON.parse(localStorage.getItem(PUBLIC_ID_STORAGE_KEY) || '[]');
+  } catch (error) {
+    console.error('Could not load public ID registry:', error);
+    return [];
+  }
+  if (!Array.isArray(storedIds)) {
+    console.error('Saved public ID registry is not an array.');
+    return [];
+  }
+  if (storedIds.some(id => typeof id !== 'string')) {
+    throw new Error('Saved public ID registry is invalid.');
+  }
+  return storedIds.filter(id => typeof id === 'string' && /^\d{3}-\d{3}$/.test(id));
+};
+
+const reservePublicId = publicId => {
+  const reservedIds = loadReservedPublicIds();
+  if (!reservedIds.includes(publicId)) {
+    localStorage.setItem(PUBLIC_ID_STORAGE_KEY, JSON.stringify([...reservedIds, publicId]));
+  }
+};
+
+const generateUniquePublicId = () => {
+  const usedIds = new Set([...loadReservedPublicIds(), ADMIN_PUBLIC_ID]);
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const digits = Math.floor(100000 + Math.random() * 900000).toString();
+    const publicId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    if (!usedIds.has(publicId)) return publicId;
+  }
+  throw new Error('Could not generate a unique public ID.');
+};
+
+const loadRegisteredProfile = () => {
+  try {
+    const savedProfile = JSON.parse(localStorage.getItem('anoni-user-profile') || 'null');
+    if (
+      savedProfile
+      && typeof savedProfile.id === 'string'
+      && typeof savedProfile.name === 'string'
+      && savedProfile.name.trim()
+      && Number.isInteger(savedProfile.age)
+      && savedProfile.age >= 1
+      && savedProfile.age <= 120
+    ) {
+      if (typeof savedProfile.publicId !== 'string' || !/^\d{3}-\d{3}$/.test(savedProfile.publicId)) {
+        savedProfile.publicId = generateUniquePublicId();
+        localStorage.setItem('anoni-user-profile', JSON.stringify(savedProfile));
+      }
+      try {
+        reservePublicId(savedProfile.publicId);
+      } catch (error) {
+        console.error('Could not reserve the saved public ID:', error);
+      }
+      return savedProfile;
+    }
+  } catch (error) {
+    console.error('Could not load the saved user profile:', error);
+  }
+
+  return null;
+};
+
+const loadSavedUserState = profile => {
+  if (!profile) return [];
+  const defaults = {
+    id: profile.id,
+    publicId: profile.publicId,
+    name: profile.name,
+    age: profile.age,
+    username: '',
+    xp: 0,
+    coins: loadSavedCoins(profile.id),
+    isPro: Boolean(profile.isPro),
+    proMonths: Number(profile.proMonths) || 0,
+    subscriptionUntil: profile.subscriptionUntil ?? null,
+    bannedUntil: profile.bannedUntil ?? null,
+    ban: profile.ban ?? null,
+    avatar: null,
+    ownedItems: [],
+    equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
+    aiFreeUsedThisWeek: false,
+    testsCreatedToday: 0
+  };
+  try {
+    const savedUser = JSON.parse(localStorage.getItem(`anoni-user-state-${profile.id}`) || 'null');
+    if (savedUser && savedUser.id === profile.id) {
+      return [{
+        ...defaults,
+        ...savedUser,
+        name: profile.name,
+        age: profile.age,
+        avatar: loadSavedAvatar(),
+        publicId: profile.publicId,
+        subscriptionUntil: profile.subscriptionUntil ?? savedUser.subscriptionUntil ?? null,
+        bannedUntil: profile.bannedUntil ?? savedUser.bannedUntil ?? null,
+        ban: profile.ban ?? savedUser.ban ?? null,
+        isPro: profile.isPro ?? savedUser.isPro ?? false,
+        proMonths: profile.proMonths ?? savedUser.proMonths ?? 0
+      }];
+    }
+  } catch (error) {
+    console.error('Could not load the saved user state:', error);
+  }
+  defaults.avatar = loadSavedAvatar();
+  return [defaults];
+};
+
+const loadSavedAvatar = () => {
+  try {
+    const avatar = localStorage.getItem('anoni_avatar');
+    return avatar?.startsWith('data:image/') ? avatar : null;
+  } catch (error) {
+    console.error('Could not load the saved avatar:', error);
+    return null;
+  }
+};
+
+const getDailyLoginStorageKey = userId => `anoni-daily-login-${userId}`;
+const getUserCoinsStorageKey = userId => `anoni-user-coins-${userId}`;
+
+const loadSavedCoins = userId => {
+  try {
+    const coins = Number(localStorage.getItem(getUserCoinsStorageKey(userId)));
+    return Number.isInteger(coins) && coins >= 0 ? coins : 0;
+  } catch (error) {
+    console.error('Could not load the saved coin balance:', error);
+    return 0;
+  }
+};
+
+const getDateDifferenceInDays = (fromDate, toDate) => {
+  const from = new Date(`${fromDate}T00:00:00Z`);
+  const to = new Date(`${toDate}T00:00:00Z`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+};
+
+const ADMIN_PROFILE = {
+  id: 'ANONI-ADMIN',
+  publicId: ADMIN_PUBLIC_ID,
+  name: 'ADMIN',
+  xp: 0,
+  proMonths: 0,
+  avatar: null,
+  equipped: { nameColor: 'text-[#C8A66A]', font: 'font-black', frame: 'border-[#C8A66A]', anim: '' }
+};
+
+const SUBSCRIPTION_DURATIONS = [
+  { label: '1 oylik', months: 1 },
+  { label: '2 oylik', months: 2 },
+  { label: '3 oylik', months: 3 }
+];
+const BAN_DURATIONS = [
+  { label: '1 kunlik', days: 1 },
+  { label: '2 kunlik', days: 2 },
+  { label: '3 kunlik', days: 3 },
+  { label: '1 oylik', months: 1 },
+  { label: '1 yillik', years: 1 }
+];
+
+const addCalendarDuration = (timestamp, duration) => {
+  const date = new Date(timestamp);
+  const dayOfMonth = date.getDate();
+  date.setDate(1);
+  if (duration.years) date.setFullYear(date.getFullYear() + duration.years);
+  if (duration.months) date.setMonth(date.getMonth() + duration.months);
+  if (duration.days) date.setDate(date.getDate() + duration.days);
+  if (duration.months || duration.years) {
+    const lastDayOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    date.setDate(Math.min(dayOfMonth, lastDayOfMonth));
+  }
+  return date.getTime();
+};
+
+const formatLocalDateTime = timestamp => new Intl.DateTimeFormat('uz-UZ', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+}).format(new Date(timestamp));
 
 const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 
@@ -165,6 +367,23 @@ const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 
 
 export default function App() {
+  const [registeredProfile, setRegisteredProfile] = useState(loadRegisteredProfile);
+  const [avatarDataUrl, setAvatarDataUrl] = useState(loadSavedAvatar);
+  const [isAvatarDragOver, setIsAvatarDragOver] = useState(false);
+  const [registrationName, setRegistrationName] = useState('');
+  const [registrationAge, setRegistrationAge] = useState('');
+  const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
+  const [registrationError, setRegistrationError] = useState('');
+  const [currentUserId, setCurrentUserId] = useState(() => registeredProfile?.id || 'AN-1001');
+  const currentUserInitials = (registeredProfile?.name || '')
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(namePart => namePart[0])
+    .join('')
+    .toUpperCase();
+  const weeklyRewardStorageKey = `anoni-weekly-test-rewards-${currentUserId}`;
+  const dailyTestCreationStorageKey = `anoni-daily-test-creations-${currentUserId}`;
+  const achievementStorageKey = `anoni-achievements-${currentUserId}`;
 
   // --- Global Navigation & Mode ---
 
@@ -177,6 +396,36 @@ export default function App() {
   const [adminTab, setAdminTab] = useState('dashboard');
 
   const [toast, setToast] = useState(null);
+  const [dailyRewardModal, setDailyRewardModal] = useState(null);
+  const [accountActionModal, setAccountActionModal] = useState(null);
+  const [achievementNotifications, setAchievementNotifications] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(achievementStorageKey) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch (error) {
+      console.error('Could not load achievement notifications:', error);
+      return [];
+    }
+  });
+
+  const [dailyTestCreationProgress, setDailyTestCreationProgress] = useState(() => {
+    const today = getLocalDateKey();
+    try {
+      const stored = JSON.parse(localStorage.getItem(dailyTestCreationStorageKey) || 'null');
+      if (stored?.date === today && Number.isInteger(stored.count) && stored.count >= 0) {
+        return stored;
+      }
+    } catch (error) {
+      console.error('Could not load daily test creation progress:', error);
+    }
+
+    return { date: today, count: 0 };
+  });
+
+  const dailyTestCreationCount = dailyTestCreationProgress.date === getLocalDateKey()
+    ? dailyTestCreationProgress.count
+    : 0;
+  const reachedDailyTestCreationLimit = dailyTestCreationCount >= 2;
 
 
 
@@ -186,6 +435,74 @@ export default function App() {
 
     setTimeout(() => setToast(null), 3500);
 
+  };
+
+  const handleCopyPublicId = async publicId => {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable.');
+      }
+      await navigator.clipboard.writeText(publicId);
+      showToast('ID nusxa olindi!');
+    } catch (error) {
+      console.error('Could not copy the public ID:', error);
+      showToast("ID nusxa olinmadi. Brauzer ruxsatlarini tekshiring.", 'error');
+    }
+  };
+
+  const applyAccountAction = (userId, action, duration) => {
+    const targetUser = users.find(user => user.id === userId);
+    if (!targetUser) {
+      showToast("Foydalanuvchi topilmadi. Sahifani yangilang.", 'error');
+      return;
+    }
+
+    const now = Date.now();
+    let nextUser;
+    let auditMessage;
+    if (action === 'subscription') {
+      const subscriptionStart = Math.max(Number(targetUser.subscriptionUntil) || now, now);
+      const subscriptionUntil = addCalendarDuration(subscriptionStart, duration);
+      nextUser = {
+        ...targetUser,
+        isPro: true,
+        proMonths: Math.max(targetUser.proMonths || 0, duration.months),
+        subscriptionUntil
+      };
+      auditMessage = `${targetUser.name} ga PRO obuna ${duration.label} muddatga berildi`;
+    } else if (action === 'ban') {
+      const bannedUntil = addCalendarDuration(now, duration);
+      nextUser = {
+        ...targetUser,
+        bannedUntil,
+        ban: {
+          reason: "Qoidabuzarlik va g'irromlik",
+          duration: duration.label,
+          bannedUntil
+        }
+      };
+      auditMessage = `${targetUser.name} ${duration.label} muddatga BAN qilindi`;
+    } else {
+      nextUser = { ...targetUser, ban: null, bannedUntil: null };
+      auditMessage = `${targetUser.name} BANdan ochildi`;
+    }
+
+    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? nextUser : user));
+    setAuditLogs(previousLogs => [{
+      id: `L-${Date.now()}`,
+      admin: 'Admin',
+      action: auditMessage,
+      time: 'Hozirgina'
+    }, ...previousLogs]);
+    setAccountActionModal(null);
+    showToast(
+      action === 'subscription'
+        ? `${targetUser.name} ga ${duration.label} obuna berildi!`
+        : action === 'ban'
+          ? `${targetUser.name} ${duration.label} muddatga bloklandi.`
+          : `${targetUser.name} blokdan chiqarildi.`,
+      action === 'ban' ? 'error' : 'success'
+    );
   };
 
 
@@ -210,164 +527,196 @@ export default function App() {
 
     aiSystemPrompt: "Sen ANONI platformasining rasmiy AI yordamchisisiz. Foydalanuvchilarga xushmuomala va aniq tushuntirish ber. ANONI bu do'stlar bilimini sinash uchun testlar, reyting va kundalik challenge o'yinlar platformasi. PRO obuna narxi $2.50/oy, u 30 tagacha savol tuzish va profilni bezash imkonini beradi. 9-darajaga o'tish uchun 3 oy uzluksiz PRO kerak. Barcha javoblarni faqat o'zbek tilida qisqa va tushunarli yoz.",
 
-    level11GiftTitle: "Maxsus ANONI Merch Box + iPhone 16 Pro o'yinida ishtirok",
-
-    level11GiftPhoto: "https://images.unsplash.com/photo-1513885535751-8b9238bd345a?w=600&auto=format&fit=crop&q=80"
-
   });
 
 
 
   // --- Users State ---
 
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const [users, setUsers] = useState(() => loadSavedUserState(registeredProfile));
 
-  const [currentUserId, setCurrentUserId] = useState('AN-1001');
 
-  const [users, setUsers] = useState([
 
-    {
+  const storedCurrentUser = users.find(u => u.id === currentUserId) || {
+    id: currentUserId,
+    name: registeredProfile?.name || 'Foydalanuvchi',
+    xp: 0,
+    coins: loadSavedCoins(currentUserId),
+    isPro: false,
+    proMonths: 0,
+    subscriptionUntil: registeredProfile?.subscriptionUntil ?? null,
+    bannedUntil: registeredProfile?.bannedUntil ?? null,
+    avatar: avatarDataUrl,
+    ban: null,
+    ownedItems: [],
+    equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
+    aiFreeUsedThisWeek: false,
+    testsCreatedToday: 0
+  };
+  const currentUser = {
+    ...storedCurrentUser,
+    id: currentUserId,
+    publicId: registeredProfile?.publicId || storedCurrentUser.publicId,
+    name: registeredProfile?.name || storedCurrentUser.name,
+    age: registeredProfile?.age || storedCurrentUser.age || null,
+    subscriptionUntil: registeredProfile?.subscriptionUntil ?? storedCurrentUser.subscriptionUntil ?? null,
+    bannedUntil: registeredProfile?.bannedUntil ?? storedCurrentUser.bannedUntil ?? null,
+    ban: registeredProfile?.ban ?? storedCurrentUser.ban ?? null,
+    isPro: registeredProfile?.subscriptionUntil
+      ? registeredProfile.subscriptionUntil > Date.now()
+      : storedCurrentUser.subscriptionUntil
+        ? storedCurrentUser.subscriptionUntil > Date.now()
+        : Boolean(storedCurrentUser.isPro),
+    username: '',
+    avatar: avatarDataUrl
+  };
+  const isCurrentlyBanned = currentUser.bannedUntil
+    ? Number(currentUser.bannedUntil) > Date.now()
+    : Boolean(currentUser.ban);
+  const sortedUsersByXP = users
+    .filter(user => user.id !== currentUser.id)
+    .concat(currentUser)
+    .sort((a, b) => b.xp - a.xp);
+  const leaderboardUsers = [...sortedUsersByXP, ADMIN_PROFILE];
 
-      id: 'AN-1001',
+  const userLevel = getUserLevelInfo(currentUser.xp, currentUser.proMonths);
 
-      name: 'Asadbek',
+  useEffect(() => {
+    if (!registeredProfile || users.length === 0) return;
+    const userState = users.find(user => user.id === currentUserId);
+    if (!userState) return;
 
-      username: 'asadbek_dev',
+    try {
+      localStorage.setItem(`anoni-user-state-${currentUserId}`, JSON.stringify(userState));
+      const savedProfile = JSON.parse(localStorage.getItem('anoni-user-profile') || 'null');
+      if (savedProfile?.id === currentUserId) {
+        const nextProfile = {
+          ...savedProfile,
+          subscriptionUntil: userState.subscriptionUntil ?? null,
+          bannedUntil: userState.bannedUntil ?? null,
+          ban: userState.ban ?? null,
+          isPro: userState.isPro ?? false,
+          proMonths: userState.proMonths ?? 0
+        };
+        localStorage.setItem('anoni-user-profile', JSON.stringify(nextProfile));
+        const profileFieldsChanged = [
+          'subscriptionUntil',
+          'bannedUntil',
+          'ban',
+          'isPro',
+          'proMonths'
+        ].some(field => JSON.stringify(registeredProfile[field] ?? null) !== JSON.stringify(nextProfile[field] ?? null));
+        if (profileFieldsChanged) {
+          setRegisteredProfile(previous => previous?.id === currentUserId ? nextProfile : previous);
+        }
+      }
+    } catch (error) {
+      console.error('Could not persist the user account state:', error);
+      showToast("Foydalanuvchi ma'lumotlarini saqlab bo'lmadi.", 'error');
+    }
+  }, [users, currentUserId, registeredProfile]);
 
-      xp: 245,
+  useEffect(() => {
+    if (!registeredProfile) return;
+    try {
+      localStorage.setItem(getUserCoinsStorageKey(currentUserId), String(currentUser.coins));
+    } catch (error) {
+      console.error('Could not save the coin balance:', error);
+      showToast("Coin balansini brauzerda saqlab bo'lmadi.", 'error');
+    }
+  }, [currentUserId, currentUser.coins, registeredProfile]);
 
-      coins: 180,
+  useEffect(() => {
+    if (!registeredProfile) return;
 
-      isPro: false,
+    const today = getLocalDateKey();
+    const dailyLoginKey = getDailyLoginStorageKey(currentUserId);
+    const coinsKey = getUserCoinsStorageKey(currentUserId);
+    let previousLoginValue;
+    let previousCoinsValue;
+    let previousLogin = null;
 
-      proMonths: 1,
-
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Asadbek&backgroundColor=b6e3f4',
-
-      ban: null, // { reason, until, count }
-
-      ownedItems: ['default'],
-
-      equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-yellow-400', anim: '' },
-
-      aiFreeUsedThisWeek: false,
-
-      testsCreatedToday: 1
-
-    },
-
-    {
-
-      id: 'AN-1002',
-
-      name: 'Shohruh',
-
-      username: 'shohruh_king',
-
-      xp: 3650,
-
-      coins: 940,
-
-      isPro: true,
-
-      proMonths: 4,
-
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Shohruh&backgroundColor=ffdfbf',
-
-      ban: null,
-
-      ownedItems: ['color_neon', 'frame_fire'],
-
-      equipped: { nameColor: 'text-[#C4B5FD]', font: 'font-serif', frame: 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]', anim: 'animate-pulse' },
-
-      aiFreeUsedThisWeek: false,
-
-      testsCreatedToday: 0
-
-    },
-
-    {
-
-      id: 'AN-1003',
-
-      name: 'Anora',
-
-      username: 'anora_star',
-
-      xp: 1420,
-
-      coins: 310,
-
-      isPro: true,
-
-      proMonths: 2,
-
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Anora&backgroundColor=c0aede',
-
-      ban: null,
-
-      ownedItems: [],
-
-      equipped: { nameColor: 'text-green-400', font: 'font-sans', frame: 'border-green-400', anim: '' },
-
-      aiFreeUsedThisWeek: false,
-
-      testsCreatedToday: 2
-
-    },
-
-    {
-
-      id: 'AN-1004',
-
-      name: 'Jasur',
-
-      username: 'jasur_07',
-
-      xp: 8200,
-
-      coins: 1500,
-
-      isPro: true,
-
-      proMonths: 6,
-
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jasur&backgroundColor=d1d4f9',
-
-      ban: null,
-
-      ownedItems: [],
-
-      equipped: { nameColor: 'text-red-400', font: 'font-mono', frame: 'border-red-500', anim: '' },
-
-      aiFreeUsedThisWeek: false,
-
-      testsCreatedToday: 0
-
+    try {
+      previousLoginValue = localStorage.getItem(dailyLoginKey);
+      previousCoinsValue = localStorage.getItem(coinsKey);
+      previousLogin = previousLoginValue ? JSON.parse(previousLoginValue) : null;
+    } catch (error) {
+      console.error('Could not load daily login reward progress:', error);
+      showToast("Kundalik bonus ma'lumotlarini o'qib bo'lmadi.", 'error');
+      return;
     }
 
-  ]);
+    const daysSinceLastLogin = previousLogin
+      && typeof previousLogin.lastLoginDate === 'string'
+      ? getDateDifferenceInDays(previousLogin.lastLoginDate, today)
+      : null;
 
+    if (daysSinceLastLogin === 0) return;
 
+    const previousStreak = Number.isInteger(previousLogin?.streakDay)
+      ? previousLogin.streakDay
+      : 0;
+    const streakDay = daysSinceLastLogin === 1 && previousStreak < 16
+      ? previousStreak + 1
+      : 1;
+    const rewardCoins = Math.min(streakDay + 4, 10);
+    const currentCoins = loadSavedCoins(currentUserId);
+    const nextCoins = currentCoins + rewardCoins;
 
-  const currentUser = users.find(u => u.id === currentUserId) || users[0];
+    try {
+      localStorage.setItem(coinsKey, String(nextCoins));
+      localStorage.setItem(dailyLoginKey, JSON.stringify({
+        lastLoginDate: today,
+        streakDay
+      }));
+    } catch (error) {
+      try {
+        if (previousCoinsValue === null) localStorage.removeItem(coinsKey);
+        else localStorage.setItem(coinsKey, previousCoinsValue);
+        if (previousLoginValue === null) localStorage.removeItem(dailyLoginKey);
+        else localStorage.setItem(dailyLoginKey, previousLoginValue);
+      } catch (rollbackError) {
+        console.error('Could not restore daily login reward storage:', rollbackError);
+      }
+      console.error('Could not save daily login reward:', error);
+      showToast("Kundalik bonusni saqlab bo'lmadi. Brauzer xotirasini tekshiring.", 'error');
+      return;
+    }
 
-  const sortedUsersByXP = [...users].sort((a, b) => b.xp - a.xp);
-
-  const isCurrentUserTop = sortedUsersByXP[0]?.id === currentUser.id;
-
-  const userLevel = getUserLevelInfo(currentUser.xp, currentUser.proMonths, isCurrentUserTop);
+    setUsers(previousUsers => {
+      const userExists = previousUsers.some(user => user.id === currentUserId);
+      if (!userExists) {
+        return [{
+          id: currentUserId,
+          name: registeredProfile.name,
+          age: registeredProfile.age,
+          username: '',
+          xp: 0,
+          coins: nextCoins,
+          isPro: false,
+          proMonths: 0,
+          subscriptionUntil: registeredProfile.subscriptionUntil ?? null,
+          bannedUntil: registeredProfile.bannedUntil ?? null,
+          ban: registeredProfile.ban ?? null,
+          avatar: avatarDataUrl,
+          ownedItems: [],
+          equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
+          aiFreeUsedThisWeek: false,
+          testsCreatedToday: 0
+        }, ...previousUsers];
+      }
+      return previousUsers.map(user => (
+        user.id === currentUserId ? { ...user, coins: nextCoins } : user
+      ));
+    });
+    setDailyRewardModal({ coins: rewardCoins, streakDay });
+  }, [currentUserId, registeredProfile, avatarDataUrl]);
 
 
 
   // --- Transactions & Audit Logs ---
 
   const [transactions, setTransactions] = useState([
-
-    { id: 'TX-1', userId: 'AN-1001', type: 'COIN', amount: +50, reason: 'Boshlang\'ich bonus', date: 'Bugun, 10:00' },
-
-    { id: 'TX-2', userId: 'AN-1001', type: 'XP', amount: +100, reason: '2-darajaga o\'tish', date: 'Bugun, 11:30' }
-
   ]);
 
   const [auditLogs, setAuditLogs] = useState([
@@ -422,79 +771,7 @@ export default function App() {
 
   // --- Tests State ---
 
-  const [tests, setTests] = useState([
-
-    {
-
-      id: 'TEST-101',
-
-      creatorId: 'AN-1001',
-
-      creatorName: 'Asadbek',
-
-      title: 'Meni qanchalik yaxshi bilasan?',
-
-      isAnonymous: false,
-
-      createdAt: Date.now() - 3600 * 1000 * 5, // 5 hours ago
-
-      expiresAt: Date.now() + 3600 * 1000 * 25, // 25 hours left
-
-      status: 'active',
-
-      questions: [
-
-        { q: "Mening eng sevimli faslim qaysi?", options: ["Bahor", "Yoz", "Kuz", "Qish"], correct: 2 },
-
-        { q: "Bo'sh vaqtimda nima qilishni yoqtiraman?", options: ["Kod yozish va o'yin", "Kitob o'qish", "Futbol ko'rish", "Uxlash"], correct: 0 },
-
-        { q: "Qaysi taomni eng ko'p yaxshi ko'raman?", options: ["Osh", "Shashlik", "Pizza", "Lavash"], correct: 0 }
-
-      ],
-
-      attempts: [
-
-        { userId: 'AN-1002', userName: 'Shohruh', score: 3, total: 3, percent: 100, date: '2 soat oldin' },
-
-        { userId: 'AN-1003', userName: 'Anora', score: 2, total: 3, percent: 67, date: '1 soat oldin' }
-
-      ]
-
-    },
-
-    {
-
-      id: 'TEST-102',
-
-      creatorId: 'AN-1002',
-
-      creatorName: 'Shohruh',
-
-      title: 'Shohruhning sirli dunyosi 🔥',
-
-      isAnonymous: true,
-
-      createdAt: Date.now() - 3600 * 1000 * 2,
-
-      expiresAt: Date.now() + 3600 * 1000 * 28,
-
-      status: 'active',
-
-      questions: [
-
-        { q: "Shohruh qaysi mashinani orzu qiladi?", options: ["BMW M5", "Mercedes G63", "Porsche 911", "Tesla Cybertruck"], correct: 0 },
-
-        { q: "Qaysi davlatga sayohat qilishni xohlaydi?", options: ["Yaponiya", "Shveysariya", "AQSH", "Turkiya"], correct: 1 },
-
-        { q: "Uning eng katta qo'rquvi nima?", options: ["Balandlik", "Qorong'ulik", "Yolg'izlik", "Ilonlar"], correct: 0 }
-
-      ],
-
-      attempts: []
-
-    }
-
-  ]);
+  const [tests, setTests] = useState([]);
 
 
 
@@ -527,6 +804,47 @@ export default function App() {
   const [testResult, setTestResult] = useState(null);
 
   const [selectedTestDetails, setSelectedTestDetails] = useState(null);
+
+  const [testStartedAt, setTestStartedAt] = useState(null);
+
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const currentWeekKey = getCurrentWeekKey();
+
+  const [weeklyTestProgress, setWeeklyTestProgress] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(weeklyRewardStorageKey) || 'null');
+      if (stored?.weekKey === currentWeekKey && Number.isInteger(stored.completions) && stored.completions >= 0) {
+        return stored;
+      }
+    } catch (error) {
+      console.error('Could not load weekly test reward progress:', error);
+    }
+
+    return { weekKey: currentWeekKey, completions: 0 };
+  });
+
+  const weeklyTestCompletions = weeklyTestProgress.weekKey === currentWeekKey
+    ? weeklyTestProgress.completions
+    : 0;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(weeklyRewardStorageKey, JSON.stringify(weeklyTestProgress));
+    } catch (error) {
+      console.error('Could not save weekly test reward progress:', error);
+    }
+  }, [weeklyRewardStorageKey, weeklyTestProgress]);
+
+  useEffect(() => {
+    if (subView !== 'solve_test' || !activeTestToSolve || testResult || !testStartedAt) return;
+
+    const timerId = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - testStartedAt) / 1000));
+    }, 250);
+
+    return () => clearInterval(timerId);
+  }, [subView, activeTestToSolve, testResult, testStartedAt]);
 
 
 
@@ -585,20 +903,17 @@ export default function App() {
   // --- Shop Items ---
 
   const SHOP_ITEMS = [
-
-    { id: 'color_neon', name: 'Neon Binafsha Ism', category: 'nameColor', value: 'text-[#C4B5FD] drop-shadow-[0_0_8px_rgba(139,92,246,0.8)]', price: 50, preview: 'Neon Ism' },
-
-    { id: 'color_gold', name: 'Oltin Qirol Ismi', category: 'nameColor', value: 'text-[#FBBF24] drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]', price: 50, preview: 'Oltin Ism' },
-
-    { id: 'font_mono', name: 'Kiberxavfsizlik Shrifti', category: 'font', value: 'font-mono tracking-wider', price: 100, preview: 'MONOSPACE' },
-
-    { id: 'frame_emerald', name: 'Zumrad Ramka', category: 'frame', value: 'border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.5)]', price: 150, preview: 'Zumrad' },
-
-    { id: 'frame_fire', name: 'Olovi Qirol Ramkasi', category: 'frame', value: 'border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.8)]', price: 300, preview: 'Olovli' },
-
-    { id: 'anim_pulse', name: 'Yurak Urishi Animatsiyasi', category: 'anim', value: 'animate-pulse', price: 500, preview: 'Animatsiya' }
-
+    { id: 'status_heart', name: 'Yurakcha Animatsiyasi', description: 'Ismingiz atrofida pulsatsiya qiluvchi yurak', category: 'status', value: 'status_heart', price: 350, icon: Heart, iconClass: 'text-rose-400', glowClass: 'bg-rose-500/15 ring-1 ring-rose-400/30', effectClass: 'animate-pulse' },
+    { id: 'status_eagle', name: 'Burgut Statusi', description: 'Kuch va ulug‘vorlik belgisi', category: 'status', value: 'status_eagle', price: 500, icon: Bird, iconClass: 'text-sky-300', glowClass: 'bg-sky-500/15 ring-1 ring-sky-300/30', effectClass: 'animate-bounce' },
+    { id: 'status_fire', name: 'Olovli Ism', description: 'Ismingiz ustida yonayotgan olov effekti', category: 'status', value: 'status_fire', price: 700, icon: Flame, iconClass: 'text-orange-400', glowClass: 'bg-orange-500/15 ring-1 ring-orange-400/30', effectClass: 'animate-pulse' },
+    { id: 'status_crown', name: 'Qirollik Toji', description: 'Ismingiz ustidagi oltin toj belgisi', category: 'status', value: 'status_crown', price: 950, icon: Crown, iconClass: 'text-amber-300', glowClass: 'bg-amber-500/15 ring-1 ring-amber-300/30', effectClass: 'animate-bounce' },
+    { id: 'status_lightning', name: 'Neon Chaqmoq', description: 'Tezkorlik va energiya animatsiyasi', category: 'status', value: 'status_lightning', price: 1200, icon: Zap, iconClass: 'text-violet-300', glowClass: 'bg-violet-500/15 ring-1 ring-violet-300/30', effectClass: 'animate-pulse' },
+    { id: 'status_star', name: 'Yulduzcha Statusi', description: 'Premium foydalanuvchi belgisi', category: 'status', value: 'status_star', price: 1500, icon: Star, iconClass: 'text-yellow-300', glowClass: 'bg-yellow-500/15 ring-1 ring-yellow-300/30', effectClass: 'animate-pulse' },
+    { id: 'status_vip_check', name: 'VIP Oq Galichka', description: 'Tasdiqlangan maxsus profil', category: 'status', value: 'status_vip_check', price: 2000, icon: BadgeCheck, iconClass: 'text-white', glowClass: 'bg-slate-400/15 ring-1 ring-white/30', effectClass: 'animate-pulse' },
+    { id: 'status_gold_check', name: 'Oltin Galichka', description: 'Eng nufuzli va qimmat status', category: 'status', value: 'status_gold_check', price: 4000, icon: BadgeCheck, secondaryIcon: Crown, iconClass: 'text-amber-300', glowClass: 'bg-amber-500/15 ring-1 ring-amber-300/40', effectClass: 'animate-pulse' }
   ];
+
+  const equippedStatus = SHOP_ITEMS.find(item => item.id === currentUser.equipped.status);
 
 
 
@@ -613,8 +928,10 @@ export default function App() {
   const [smsCode, setSmsCode] = useState('');
 
   const [paymentStep, setPaymentStep] = useState(1);
-
-
+  const [coinPurchaseCoins, setCoinPurchaseCoins] = useState(null);
+  const coinPurchaseMessage = coinPurchaseCoins
+    ? `Salom! Men ANONI tizimidan ${currentUser.name} bo'laman. Menga ${coinPurchaseCoins} Coin kerak. To'lov qilish uchun yordam bering.`
+    : '';
 
   // --- Support & AI Chat State ---
 
@@ -626,7 +943,7 @@ export default function App() {
 
       userId: 'AN-1001',
 
-      userName: 'Asadbek',
+      userName: 'Foydalanuvchi',
 
       status: 'open',
 
@@ -675,8 +992,10 @@ export default function App() {
   const [adTimer, setAdTimer] = useState(3);
 
   const [newAdTitle, setNewAdTitle] = useState('');
-
-  const [newAdImage, setNewAdImage] = useState('');
+  const [newAdPrompt, setNewAdPrompt] = useState('');
+  const [newAdPreviewImage, setNewAdPreviewImage] = useState('');
+  const [newAdPreviewTitle, setNewAdPreviewTitle] = useState('');
+  const [isGeneratingAdImage, setIsGeneratingAdImage] = useState(false);
 
 
 
@@ -707,7 +1026,55 @@ export default function App() {
     setAdTimer(3);
 
     setAds(prev => prev.map(a => a.id === ad.id ? { ...a, views: a.views + 1 } : a));
+  };
 
+  const handleGenerateAd = async () => {
+    const title = newAdTitle.trim();
+    const prompt = newAdPrompt.trim();
+    if (!title || !prompt || isGeneratingAdImage) return;
+
+    setIsGeneratingAdImage(true);
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=600&height=1067&nologo=true&seed=${Date.now()}`;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const image = new Image();
+        const timeoutId = setTimeout(() => {
+          image.src = '';
+          reject(new Error('AI rasm yaratish vaqti tugadi.'));
+        }, 90000);
+        image.onload = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        image.onerror = () => {
+          clearTimeout(timeoutId);
+          reject(new Error('AI rasm xizmatidan tasvir olib bo‘lmadi.'));
+        };
+        image.src = imageUrl;
+      });
+
+      const newAd = {
+        id: `AD-${Date.now()}`,
+        title,
+        imageUrl,
+        active: true,
+        views: 0,
+        startDate: 'Bugun',
+        endDate: '30 kundan so‘ng'
+      };
+      setNewAdPreviewTitle(title);
+      setNewAdPreviewImage(imageUrl);
+      setAds(previousAds => [newAd, ...previousAds]);
+      setNewAdTitle('');
+      setNewAdPrompt('');
+      showToast("AI rasmli reklama muvaffaqiyatli qo'shildi!");
+    } catch (error) {
+      console.error('Could not generate the advertisement image:', error);
+      showToast(error.message || "AI rasm yaratishda xatolik yuz berdi. Qayta urinib ko'ring.", 'error');
+    } finally {
+      setIsGeneratingAdImage(false);
+    }
   };
 
 
@@ -859,11 +1226,30 @@ export default function App() {
 
 
   const handlePublishTest = () => {
+    const today = getLocalDateKey();
+    let createdToday = dailyTestCreationProgress.date === today
+      ? dailyTestCreationProgress.count
+      : 0;
+    if (dailyTestCreationStorageKey) {
+      try {
+        const stored = JSON.parse(localStorage.getItem(dailyTestCreationStorageKey) || 'null');
+        if (stored?.date === today && Number.isInteger(stored.count) && stored.count >= 0) {
+          createdToday = Math.max(createdToday, stored.count);
+        }
+      } catch (error) {
+        console.error('Could not verify daily test creation progress:', error);
+        showToast("Kunlik limitni tekshirib bo'lmadi. Test yaratish bekor qilindi.", "error");
+        return;
+      }
+    }
+
+    if (createdToday >= 2) {
+      showToast("Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!", "error");
+      return;
+    }
 
     if (!newTestTitle.trim()) {
-
       showToast("Test nomini kiriting!", "error");
-
       return;
 
     }
@@ -905,36 +1291,27 @@ export default function App() {
       createdAt: Date.now(),
 
       expiresAt: Date.now() + 30 * 3600 * 1000, // 30 soat
-
       status: 'active',
-
       questions: newTestQuestions,
-
-      attempts: []
-
+      attempts: [],
+      popularRewardGranted: false
     };
 
-
-
-    setTests(prev => [newTest, ...prev]);
-
-
-
-    // Kuniga 3 tagacha test yaratish uchun mukofot
-
-    if (currentUser.testsCreatedToday < 3) {
-
-      updateUserBalance(currentUser.id, settings.xpTestCreate, settings.coinTestCreate, `Yangi test yaratildi (${newTest.id})`);
-
-      setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, testsCreatedToday: u.testsCreatedToday + 1 } : u));
-
-      showToast(`Test faollashtirildi! +${settings.xpTestCreate} XP va +${settings.coinTestCreate} Coin berildi!`);
-
-    } else {
-
-      showToast("Test faollashtirildi! (Kunlik mukofot limiti 3/3 to'lgan)");
-
+    const nextDailyProgress = { date: today, count: createdToday + 1 };
+    if (dailyTestCreationStorageKey) {
+      try {
+        localStorage.setItem(dailyTestCreationStorageKey, JSON.stringify(nextDailyProgress));
+      } catch (error) {
+        console.error('Could not save daily test creation progress:', error);
+        showToast("Kunlik limitni saqlab bo'lmadi. Test yaratish bekor qilindi.", "error");
+        return;
+      }
     }
+
+    setDailyTestCreationProgress(nextDailyProgress);
+    setTests(prev => [newTest, ...prev]);
+    updateUserBalance(currentUser.id, 50, 0, `Yangi test yaratildi (${newTest.id})`);
+    showToast("+50 XP: Yangi test muvaffaqiyatli yaratildi!");
 
 
 
@@ -980,6 +1357,10 @@ export default function App() {
 
     setTestResult(null);
 
+    const startedAt = Date.now();
+    setTestStartedAt(startedAt);
+    setElapsedSeconds(0);
+
     setSubView('solve_test');
 
   };
@@ -1011,7 +1392,26 @@ export default function App() {
       });
 
       const percent = Math.round((correctCount / activeTestToSolve.questions.length) * 100);
-
+      const elapsedTestSeconds = testStartedAt
+        ? Math.floor((Date.now() - testStartedAt) / 1000)
+        : 0;
+      const isSpam = elapsedTestSeconds < 10;
+      const participantCount = activeTestToSolve.attempts.filter(
+        attempt => !attempt.isSpam && attempt.userId !== activeTestToSolve.creatorId
+      ).length + (currentUser.id !== activeTestToSolve.creatorId ? 1 : 0);
+      const authorParticipantCount = activeTestToSolve.attempts.filter(
+        attempt => !attempt.isSpam && attempt.userId !== activeTestToSolve.creatorId
+      ).length + (!isSpam && currentUser.id !== activeTestToSolve.creatorId ? 1 : 0);
+      const grantsPopularAchievement = !isSpam
+        && currentUser.id !== activeTestToSolve.creatorId
+        && authorParticipantCount === 50
+        && !activeTestToSolve.popularRewardGranted;
+      const rewardXp = weeklyTestCompletions < 3
+        ? (participantCount <= 100 ? 100 : 30)
+        : 0;
+      const rewardCoins = weeklyTestCompletions < 3
+        ? (participantCount <= 100 ? 100 : 30)
+        : 30;
       const attemptObj = {
 
         userId: currentUser.id,
@@ -1023,44 +1423,90 @@ export default function App() {
         total: activeTestToSolve.questions.length,
 
         percent,
-
-        date: 'Hozirgina'
+        date: 'Hozirgina',
+        elapsedSeconds: elapsedTestSeconds,
+        isSpam,
+        rewardXp: isSpam ? 0 : rewardXp,
+        rewardCoins: isSpam ? 0 : rewardCoins
 
       };
 
 
-
-      // Update test attempts & reward creator according to formula:
-
-      // XP = min(2 * solvers, 20), Coin = min(2 * solvers, 50)
-
-      setTests(prev => prev.map(t => {
-
-        if (t.id !== activeTestToSolve.id) return t;
-
-        const newAttempts = [...t.attempts, attemptObj];
-
-        const solverCount = newAttempts.length;
-
-        const giveXp = solverCount <= 10 ? settings.xpPerSolver : 0; // max 20 XP (10 solvers * 2)
-
-        const giveCoin = solverCount <= 25 ? settings.coinPerSolver : 0; // max 50 Coin (25 solvers * 2)
-
-        if (giveXp > 0 || giveCoin > 0) {
-
-          updateUserBalance(t.creatorId, giveXp, giveCoin, `Test ishtirokchisi uchun mukofot (${t.id})`);
-
+      setTests(prev => prev.map(t => t.id === activeTestToSolve.id
+        ? {
+          ...t,
+          attempts: [...t.attempts, attemptObj],
+          popularRewardGranted: t.popularRewardGranted || grantsPopularAchievement
         }
+        : t));
 
-        return { ...t, attempts: newAttempts };
+      updateUserBalance(
+        currentUser.id,
+        isSpam ? -30 : rewardXp,
+        isSpam ? -30 : rewardCoins,
+        isSpam
+          ? 'Juda tez test yechish jarimasi'
+          : `Test yechish mukofoti (${activeTestToSolve.id})`
+      );
 
-      }));
+      if (!isSpam) {
+        setWeeklyTestProgress(prev => ({
+          weekKey: currentWeekKey,
+          completions: (prev.weekKey === currentWeekKey ? prev.completions : 0) + 1
+        }));
+      }
 
+      if (!isSpam && currentUser.id !== activeTestToSolve.creatorId) {
+        const creatorReward = authorParticipantCount === 1 ? 10 : 5;
+        updateUserBalance(
+          activeTestToSolve.creatorId,
+          creatorReward,
+          creatorReward,
+          `Test ishtirokchisi uchun muallif mukofoti (${activeTestToSolve.id})`
+        );
+      }
 
+      if (grantsPopularAchievement) {
+        updateUserBalance(
+          activeTestToSolve.creatorId,
+          0,
+          300,
+          `Ommabop test yutug'i (${activeTestToSolve.id})`
+        );
+
+        if (activeTestToSolve.creatorId === currentUser.id) {
+          const notification = {
+            id: `popular-${activeTestToSolve.id}`,
+            title: 'Ommabop test',
+            message: `"${activeTestToSolve.title}" testi 50 nafar qatnashchiga yetdi. +300 Coin mukofot olindi!`,
+            createdAt: Date.now()
+          };
+          setAchievementNotifications(prev => prev.some(item => item.id === `popular-${activeTestToSolve.id}`)
+            ? prev
+            : [notification, ...prev]);
+          let notificationSaved = true;
+          if (achievementStorageKey) {
+            try {
+              const nextNotifications = [
+                notification,
+                ...achievementNotifications.filter(item => item.id !== notification.id)
+              ];
+              localStorage.setItem(achievementStorageKey, JSON.stringify(nextNotifications));
+            } catch (error) {
+              notificationSaved = false;
+              console.error('Could not save achievement notification:', error);
+              showToast("Yutuq bildirishnomasini saqlab bo'lmadi.", 'error');
+            }
+          }
+          if (notificationSaved) showToast('🎉 Ommabop test yutug‘i! +300 Coin mukofot berildi!');
+        }
+      }
 
       setTestResult(attemptObj);
 
-      showToast("Natijangiz hisoblandi!");
+      if (!grantsPopularAchievement) {
+        showToast(isSpam ? 'Tez yechish aniqlandi: jarima qo‘llandi.' : 'Natijangiz hisoblandi!');
+      }
 
     }
 
@@ -1160,7 +1606,7 @@ export default function App() {
 
     } else if (paymentModal.type === 'COINS') {
 
-      updateUserBalance(currentUser.id, 0, paymentModal.coinsAmount, `Click orqali ${paymentModal.coinsAmount} Coin xarid qilindi`);
+      updateUserBalance(currentUser.id, 0, paymentModal.coinsAmount, `Click & Payme orqali ${paymentModal.coinsAmount} Coin xarid qilindi`);
 
       showToast(`Balansingizga +${paymentModal.coinsAmount} ANONI COIN qo'shildi! 🪙`);
 
@@ -1176,15 +1622,213 @@ export default function App() {
 
   };
 
+  const handleRegistrationSubmit = (event) => {
+    event.preventDefault();
+
+    if (!registrationTermsAccepted) {
+      setRegistrationError("Davom etish uchun foydalanish shartlariga rozilik bildiring.");
+      return;
+    }
+
+    const name = registrationName.trim();
+    const age = Number(registrationAge);
+    if (!name) {
+      setRegistrationError("Ismingizni kiriting.");
+      return;
+    }
+    if (!Number.isInteger(age) || age < 1 || age > 120) {
+      setRegistrationError("Yosh 1 dan 120 gacha bo'lgan butun son bo'lishi kerak.");
+      return;
+    }
+
+    let profile;
+    try {
+      profile = {
+        id: `AN-${globalThis.crypto?.randomUUID?.() || Date.now()}`,
+        publicId: generateUniquePublicId(),
+        name,
+        age
+      };
+      reservePublicId(profile.publicId);
+    } catch (error) {
+      console.error('Could not generate or reserve a unique public ID:', error);
+      setRegistrationError("Takrorlanmaydigan ID yaratib bo'lmadi. Qayta urinib ko'ring.");
+      return;
+    }
+    const weeklyKey = `anoni-weekly-test-rewards-${profile.id}`;
+    const dailyKey = `anoni-daily-test-creations-${profile.id}`;
+    const achievementsKey = `anoni-achievements-${profile.id}`;
+    let weeklyProgress = { weekKey: currentWeekKey, completions: 0 };
+    let dailyProgress = { date: getLocalDateKey(), count: 0 };
+    let savedAchievements = [];
+
+    try {
+      const storedWeekly = JSON.parse(localStorage.getItem(weeklyKey) || 'null');
+      if (storedWeekly?.weekKey === currentWeekKey && Number.isInteger(storedWeekly.completions)) {
+        weeklyProgress = storedWeekly;
+      }
+      const storedDaily = JSON.parse(localStorage.getItem(dailyKey) || 'null');
+      if (storedDaily?.date === dailyProgress.date && Number.isInteger(storedDaily.count)) {
+        dailyProgress = storedDaily;
+      }
+      const storedAchievements = JSON.parse(localStorage.getItem(achievementsKey) || '[]');
+      if (Array.isArray(storedAchievements)) savedAchievements = storedAchievements;
+      localStorage.setItem('anoni-user-profile', JSON.stringify(profile));
+    } catch (error) {
+      console.error('Could not save or load local registration data:', error);
+      setRegistrationError("Ma'lumotni saqlab bo'lmadi. Brauzer xotirasi va ruxsatlarini tekshiring.");
+      return;
+    }
+
+    setCurrentUserId(profile.id);
+    setWeeklyTestProgress(weeklyProgress);
+    setDailyTestCreationProgress(dailyProgress);
+    setAchievementNotifications(savedAchievements);
+    setUsers(prev => [
+      {
+        id: profile.id,
+        publicId: profile.publicId,
+        name: profile.name,
+        age: profile.age,
+        username: '',
+        xp: 0,
+        coins: 0,
+        isPro: false,
+        proMonths: 0,
+        subscriptionUntil: null,
+        bannedUntil: null,
+        avatar: null,
+        ban: null,
+        ownedItems: [],
+        equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
+        aiFreeUsedThisWeek: false,
+        testsCreatedToday: 0
+      },
+      ...prev
+    ]);
+    setRegisteredProfile(profile);
+  };
+
+  const saveAvatarFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast("Faqat rasm faylini yuklash mumkin.", 'error');
+      return;
+    }
+    if (file.size > 1500000) {
+      showToast("Rasm hajmi 1.5 MB dan oshmasligi kerak.", 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || !reader.result.startsWith('data:image/')) {
+        showToast("Tanlangan rasmni o'qib bo'lmadi.", 'error');
+        return;
+      }
+
+      try {
+        localStorage.setItem('anoni_avatar', reader.result);
+        setAvatarDataUrl(reader.result);
+        showToast("Profil rasmi saqlandi!");
+      } catch (error) {
+        console.error('Could not save the avatar to local storage:', error);
+        showToast("Rasmni saqlab bo'lmadi. Boshqa kichikroq rasm tanlang.", 'error');
+      }
+    };
+    reader.onerror = () => {
+      console.error('Could not read the selected avatar file:', reader.error);
+      showToast("Rasm faylini o'qib bo'lmadi.", 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
 
 
   // ============================================================================
-
   // BAN OVERLAY (Agar foydalanuvchi BAN olgan bo'lsa va Admin rejimida bo'lmasa)
-
   // ============================================================================
 
-  if (currentUser.ban && !isAdminMode) {
+  if (!registeredProfile) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#0B0912] px-5 py-8 text-white">
+        <form
+          onSubmit={handleRegistrationSubmit}
+          className="relative w-full max-w-md overflow-hidden rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#211832] via-[#15111F] to-[#100D18] p-6 shadow-[0_0_60px_rgba(139,92,246,0.2)] sm:p-8"
+        >
+          <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-violet-500/15 blur-3xl" />
+          <div className="relative">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-xl font-black tracking-widest text-violet-200 ring-1 ring-violet-300/25">
+              A
+            </div>
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-violet-300">ANONI</p>
+            <h1 className="mt-2 text-2xl font-extrabold">Xush kelibsiz!</h1>
+            <p className="mt-2 text-sm leading-relaxed text-[#A7A0B5]">
+              Davom etish uchun ismingiz va yoshingizni kiriting. Ma'lumotlar faqat shu brauzerda saqlanadi.
+            </p>
+
+            <label htmlFor="registration-name" className="mt-6 block text-xs font-semibold text-slate-300">Ism</label>
+            <input
+              id="registration-name"
+              autoComplete="given-name"
+              maxLength={50}
+              value={registrationName}
+              onChange={event => setRegistrationName(event.target.value)}
+              placeholder="Ismingiz"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+            />
+
+            <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
+            <input
+              id="registration-age"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="120"
+              step="1"
+              value={registrationAge}
+              onChange={event => setRegistrationAge(event.target.value)}
+              placeholder="Yoshingiz"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+            />
+
+            <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
+              <input
+                id="registration-terms"
+                type="checkbox"
+                required
+                checked={registrationTermsAccepted}
+                onChange={event => {
+                  setRegistrationTermsAccepted(event.target.checked);
+                  if (event.target.checked) setRegistrationError('');
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
+              />
+              <span className="text-sm leading-relaxed text-yellow-500">
+                Men qoidalarga roziman. Barcha yutuqlarim, xarid qilingan Coin va statuslar faqat ushbu brauzer xotirasida saqlanishini, agar brauzer tarixini (cache) tozalasam yoki boshqa qurilmadan kirsam, ular qayta tiklanmasdan o'chib ketishini tushunaman.
+              </span>
+            </label>
+
+            {registrationError && (
+              <p role="alert" className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {registrationError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={!registrationTermsAccepted}
+              className="mt-6 w-full rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+            >
+              🚀 Kirish
+            </button>
+          </div>
+        </form>
+      </main>
+    );
+  }
+
+  if (isCurrentlyBanned && !isAdminMode) {
 
     return (
 
@@ -1198,70 +1842,13 @@ export default function App() {
 
           </div>
 
-          <h1 className="text-3xl font-extrabold text-[#EF4444]">Siz BAN olgansiz</h1>
-
-          <p className="text-sm text-[#A7A0B5]">
-
-            Platforma xavfsizlik qoidalarini buzganingiz sababli hisobingiz vaqtinchalik cheklandi.
-
+          <h1 className="text-3xl font-extrabold text-[#EF4444]">Profil vaqtincha bloklangan</h1>
+          <p className="text-sm leading-relaxed text-[#A7A0B5]">
+            Sizning profilingiz qoidabuzarlik sababli{' '}
+            {currentUser.bannedUntil
+              ? `${formatLocalDateTime(Number(currentUser.bannedUntil))} gacha`
+              : `${currentUser.ban?.duration || 'blokdan chiqarilguncha'} muddatga`} bloklangan.
           </p>
-
-          <div className="w-full bg-black/40 rounded-2xl p-4 border border-white/10 text-left text-sm space-y-2">
-
-            <div className="flex justify-between">
-
-              <span className="text-[#A7A0B5]">Sabab:</span>
-
-              <span className="font-semibold text-white">{currentUser.ban.reason}</span>
-
-            </div>
-
-            <div className="flex justify-between">
-
-              <span className="text-[#A7A0B5]">Muddat:</span>
-
-              <span className="font-semibold text-[#FBBF24]">{currentUser.ban.duration}</span>
-
-            </div>
-
-            <div className="flex justify-between">
-
-              <span className="text-[#A7A0B5]">Holat:</span>
-
-              <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">Tekshiruv 24 soatgacha</span>
-
-            </div>
-
-          </div>
-
-
-
-          <button 
-
-            onClick={() => {
-
-              setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, ban: null } : u));
-
-              showToast("Apellyatsiya yuborildi va demo rejimda BAN olib tashlandi.");
-
-            }}
-
-            className="w-full bg-[#8B5CF6] hover:bg-[#7C3AED] text-white py-3.5 rounded-xl font-semibold transition-all">
-
-            Support xizmatiga apellyatsiya yozish
-
-          </button>
-
-          <button 
-
-            onClick={() => setIsAdminMode(true)}
-
-            className="text-xs text-[#A7A0B5] underline mt-2">
-
-            Admin Panelga o'tib BANni ochish
-
-          </button>
-
         </div>
 
       </div>
@@ -1430,7 +2017,7 @@ export default function App() {
 
                   <div className="text-[#A7A0B5] text-xs">PRO Obunachilar ($2.50)</div>
 
-                  <div className="text-3xl font-extrabold mt-1 text-[#FBBF24]">{users.filter(u => u.isPro).length}</div>
+                  <div className="text-3xl font-extrabold mt-1 text-[#FBBF24]">{users.filter(u => u.subscriptionUntil ? Number(u.subscriptionUntil) > Date.now() : u.isPro).length}</div>
 
                   <div className="text-xs text-green-400 mt-1">Click integratsiya faol</div>
 
@@ -1440,7 +2027,7 @@ export default function App() {
 
                   <div className="text-[#A7A0B5] text-xs">BAN Olganlar</div>
 
-                  <div className="text-3xl font-extrabold mt-1 text-[#EF4444]">{users.filter(u => u.ban).length}</div>
+                  <div className="text-3xl font-extrabold mt-1 text-[#EF4444]">{users.filter(u => u.bannedUntil ? Number(u.bannedUntil) > Date.now() : u.ban).length}</div>
 
                   <div className="text-xs text-[#A7A0B5] mt-1">Avto-nazorat yoqilgan</div>
 
@@ -1501,6 +2088,12 @@ export default function App() {
                 {users.map(u => {
 
                   const lvl = getUserLevelInfo(u.xp, u.proMonths);
+                  const subscriptionActive = u.subscriptionUntil
+                    ? Number(u.subscriptionUntil) > Date.now()
+                    : Boolean(u.isPro);
+                  const banActive = u.bannedUntil
+                    ? Number(u.bannedUntil) > Date.now()
+                    : Boolean(u.ban);
 
                   return (
 
@@ -1524,9 +2117,9 @@ export default function App() {
 
                             </span>
 
-                            {u.isPro && <span className="text-[10px] bg-[#8B5CF6]/20 text-[#C4B5FD] px-2 py-0.5 rounded">PRO ({u.proMonths} oy)</span>}
+                            {subscriptionActive && <span className="text-[10px] bg-[#C8A66A]/15 text-[#C8A66A] px-2 py-0.5 rounded">PRO OBUNA</span>}
 
-                            {u.ban && <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded">BAN</span>}
+                            {banActive && <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded">BAN</span>}
 
                           </div>
 
@@ -1580,51 +2173,38 @@ export default function App() {
 
                         </button>
 
-                        <button 
-
-                          onClick={() => {
-
-                            setUsers(prev => prev.map(item => item.id === u.id ? { ...item, isPro: !item.isPro, proMonths: !item.isPro ? 3 : 0 } : item));
-
-                            showToast(`${u.name} PRO holati o'zgartirildi!`);
-
-                          }}
-
-                          className="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 px-3 py-2 rounded-lg font-medium">
-
-                          {u.isPro ? 'PRO Olib tashlash' : 'PRO + 3 oy Berish'}
-
+                        <button
+                          type="button"
+                          onClick={() => setAccountActionModal({ userId: u.id, userName: u.name, type: 'subscription' })}
+                          className="text-xs rounded-lg border border-[#C8A66A]/30 bg-[#C8A66A]/10 px-3 py-2 font-medium text-[#C8A66A] transition hover:bg-[#C8A66A]/20">
+                          Obuna berish
                         </button>
 
-                        <button 
-
-                          onClick={() => {
-
-                            if (u.ban) {
-
-                              setUsers(prev => prev.map(item => item.id === u.id ? { ...item, ban: null } : item));
-
-                              setAuditLogs(prev => [{ id: `L-${Date.now()}`, admin: 'Admin', action: `${u.name} BANdan ochildi`, time: 'Hozirgina' }, ...prev]);
-
-                              showToast(`${u.name} BANdan ochildi!`);
-
-                            } else {
-
-                              setUsers(prev => prev.map(item => item.id === u.id ? { ...item, ban: { reason: "Qoidabuzarlik va g'irromlik", duration: "1 kunlik (Birinchi ogohlantirish)" } } : item));
-
-                              setAuditLogs(prev => [{ id: `L-${Date.now()}`, admin: 'Admin', action: `${u.name} 1 kunga BAN qilindi`, time: 'Hozirgina' }, ...prev]);
-
-                              showToast(`${u.name} BAN qilindi!`, 'error');
-
-                            }
-
-                          }}
-
-                          className={`text-xs px-3 py-2 rounded-lg font-medium ${u.ban ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-
-                          {u.ban ? 'BANni Ochish' : '1 Kunga BAN Qilish'}
-
+                        <button
+                          type="button"
+                          onClick={() => setAccountActionModal({ userId: u.id, userName: u.name, type: 'ban' })}
+                          className="text-xs rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 font-medium text-red-300 transition hover:bg-red-500/20">
+                          Ban qilish
                         </button>
+                        {banActive && (
+                          <button
+                            type="button"
+                            onClick={() => applyAccountAction(u.id, 'unban')}
+                            className="text-xs rounded-lg bg-emerald-500/10 px-3 py-2 font-medium text-emerald-300 transition hover:bg-emerald-500/20"
+                          >
+                            Ban ni bekor qilish
+                          </button>
+                        )}
+                        {subscriptionActive && u.subscriptionUntil && (
+                          <span className="self-center text-[10px] text-[#C8A66A]">
+                            {formatLocalDateTime(u.subscriptionUntil)} gacha
+                          </span>
+                        )}
+                        {banActive && u.bannedUntil && (
+                          <span className="self-center text-[10px] text-red-300">
+                            {formatLocalDateTime(u.bannedUntil)} gacha
+                          </span>
+                        )}
 
                       </div>
 
@@ -1876,87 +2456,112 @@ export default function App() {
 
             <div className="space-y-6">
 
-              <h2 className="text-2xl font-bold">9:16 Reklama Bannerlari (3 soniya taymer bilan)</h2>
-
-              <div className="bg-[#1D1729] p-6 rounded-2xl border border-white/10 space-y-4">
-
-                <div className="grid md:grid-cols-2 gap-4">
-
-                  <input 
-
-                    type="text"
-
-                    value={newAdTitle}
-
-                    onChange={(e) => setNewAdTitle(e.target.value)}
-
-                    placeholder="Reklama sarlavhasi..."
-
-                    className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm"
-
-                  />
-
-                  <input 
-
-                    type="text"
-
-                    value={newAdImage}
-
-                    onChange={(e) => setNewAdImage(e.target.value)}
-
-                    placeholder="Rasm URL manzili (9:16 tavsiya etiladi)..."
-
-                    className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm"
-
-                  />
-
-                </div>
-
-                <button 
-
-                  onClick={() => {
-
-                    if (!newAdTitle.trim()) return;
-
-                    const newAd = {
-
-                      id: `AD-${Date.now()}`,
-
-                      title: newAdTitle,
-
-                      imageUrl: newAdImage || 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80',
-
-                      active: true,
-
-                      views: 0,
-
-                      startDate: 'Bugun',
-
-                      endDate: '30 kundan so\'ng'
-
-                    };
-
-                    setAds(prev => [newAd, ...prev]);
-
-                    setNewAdTitle('');
-
-                    setNewAdImage('');
-
-                    showToast("Reklama qo'shildi!");
-
-                  }}
-
-                  className="bg-[#8B5CF6] px-6 py-3 rounded-xl font-semibold text-sm">
-
-                  Reklamani Qo'shish
-
-                </button>
-
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.25em] text-violet-300">AI Creative Studio</p>
+                <h2 className="mt-2 text-2xl font-bold">9:16 Reklama Bannerlari</h2>
+                <p className="mt-1 text-sm text-[#A7A0B5]">Prompt yozing, AI orqali rasm yarating va bannerda sinab ko'ring.</p>
               </div>
 
+              <div className="overflow-hidden rounded-3xl border border-violet-400/20 bg-gradient-to-br from-[#211832] via-[#171323] to-[#101018] p-5 shadow-[0_0_40px_rgba(139,92,246,0.1)] sm:p-6">
+                <div className="mb-5 flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-200">
+                    <Sparkles size={19} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white">AI Banner Generator</h3>
+                    <p className="text-xs text-slate-400">Pollinations AI • 9:16 vertikal format</p>
+                  </div>
+                </div>
 
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="space-y-4">
+                    <label className="block space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Reklama sarlavhasi</span>
+                      <input
+                        type="text"
+                        value={newAdTitle}
+                        onChange={event => setNewAdTitle(event.target.value)}
+                        placeholder="Masalan: ANONI PRO — yangi imkoniyatlar"
+                        maxLength={100}
+                        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-2 focus:ring-violet-400/15"
+                      />
+                    </label>
 
-              <div className="grid md:grid-cols-2 gap-4">
+                    <label className="block space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">AI rasm uchun prompt</span>
+                      <textarea
+                        rows={5}
+                        value={newAdPrompt}
+                        onChange={event => setNewAdPrompt(event.target.value)}
+                        placeholder="Rasm qanday ko'rinishda bo'lishini batafsil yozing. Masalan: qora fonda binafsha neon yorug'lik, futuristik mobil ilova, premium kiber estetika, vertikal reklama banneri..."
+                        maxLength={500}
+                        className="w-full resize-y rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm leading-relaxed text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/15"
+                      />
+                      <span className="block text-right text-[10px] text-slate-500">{newAdPrompt.length}/500</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerateAd}
+                      disabled={isGeneratingAdImage || !newAdTitle.trim() || !newAdPrompt.trim()}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-500 px-5 py-3.5 text-sm font-extrabold text-white shadow-[0_0_25px_rgba(139,92,246,0.25)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                    >
+                      {isGeneratingAdImage ? (
+                        <>
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                          AI rasm yaratmoqda... ⏳
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={16} />
+                          AI orqali Rasm va Reklamani Qo'shish
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="mx-auto w-full max-w-[220px]">
+                    <p className="mb-2 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/80">9:16 Live Preview</p>
+                    <div className="relative aspect-[9/16] overflow-hidden rounded-2xl border border-cyan-300/20 bg-black/50 shadow-[0_0_30px_rgba(34,211,238,0.1)]">
+                      {newAdPreviewImage ? (
+                        <>
+                          <img src={newAdPreviewImage} alt="AI yaratgan reklama banneri" className="absolute inset-0 h-full w-full object-cover" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/15 to-transparent" />
+                          <div className="absolute inset-x-3 bottom-4 text-center text-sm font-extrabold text-white drop-shadow-lg">
+                            {newAdPreviewTitle || 'AI reklama banneringiz'}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-200">
+                            {isGeneratingAdImage ? <span className="h-6 w-6 animate-spin rounded-full border-2 border-violet-200/30 border-t-violet-200" /> : <Sparkles size={21} />}
+                          </div>
+                          <p className="text-xs leading-relaxed text-slate-400">
+                            {isGeneratingAdImage ? 'AI tasvir ustida ishlamoqda...' : 'Yaratilgan banner shu yerda ko‘rinadi'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!newAdPreviewImage || isGeneratingAdImage}
+                      onClick={() => {
+                        const previewAd = ads.find(ad => ad.imageUrl === newAdPreviewImage);
+                        if (previewAd) {
+                          setIsAdminMode(false);
+                          triggerAdPopup(previewAd);
+                        }
+                      }}
+                      className="mt-3 w-full rounded-xl border border-cyan-300/20 bg-cyan-400/10 px-3 py-2.5 text-xs font-bold text-cyan-100 transition hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Hozir Ekranda Sinash (3s)
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="text-lg font-bold">Reklama ro'yxati va namoyish</h3>
+              <div className="grid gap-4 md:grid-cols-2">
 
                 {ads.map(ad => (
 
@@ -2026,7 +2631,7 @@ export default function App() {
 
                 />
 
-                <button 
+                <button
 
                   onClick={() => showToast("AI Support ko'rsatmalari yangilandi!")}
 
@@ -2048,66 +2653,69 @@ export default function App() {
 
             <div className="space-y-6">
 
-              <h2 className="text-2xl font-bold">Iqtisodiy Formulalar va 11-Daraja Sovg'asi</h2>
+              <h2 className="text-2xl font-bold">Iqtisodiy sozlamalar</h2>
 
-              <div className="bg-[#1D1729] p-6 rounded-2xl border border-white/10 space-y-4">
-
-                <h3 className="font-bold text-[#FBBF24]">11-Daraja Maxsus Sovg'asi (Rasm va Sarlavha)</h3>
-
-                <div className="grid md:grid-cols-2 gap-4">
-
-                  <div>
-
-                    <label className="text-xs text-[#A7A0B5]">Sovg'a Nomi / Sarlavhasi</label>
-
-                    <input 
-
-                      type="text"
-
-                      value={settings.level11GiftTitle}
-
-                      onChange={(e) => setSettings({ ...settings, level11GiftTitle: e.target.value })}
-
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm mt-1"
-
-                    />
-
-                  </div>
-
-                  <div>
-
-                    <label className="text-xs text-[#A7A0B5]">Sovg'a Rasmi (URL)</label>
-
-                    <input 
-
-                      type="text"
-
-                      value={settings.level11GiftPhoto}
-
-                      onChange={(e) => setSettings({ ...settings, level11GiftPhoto: e.target.value })}
-
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm mt-1"
-
-                    />
-
-                  </div>
-
-                </div>
-
-                <button 
-
-                  onClick={() => showToast("Sovg'a va iqtisodiy sozlamalar saqlandi!")}
-
-                  className="bg-[#8B5CF6] px-6 py-2.5 rounded-xl font-semibold text-sm">
-
-                  O'zgarishlarni Saqlash
-
-                </button>
-
+              <div className="rounded-2xl border border-white/10 bg-[#1D1729] p-6 text-sm text-[#A7A0B5]">
+                Hozircha boshqarish uchun qo'shimcha sozlamalar mavjud emas.
               </div>
 
             </div>
 
+          )}
+
+          {accountActionModal && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="account-action-title"
+                className="w-full max-w-sm rounded-3xl border border-[#C8A66A]/25 bg-gradient-to-br from-[#211832] via-[#171323] to-[#100D18] p-6 shadow-[0_0_50px_rgba(200,166,106,0.12)]"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#C8A66A]">Hisob boshqaruvi</p>
+                    <h2 id="account-action-title" className="mt-2 text-xl font-extrabold">
+                      {accountActionModal.type === 'subscription' ? 'Obuna muddatini tanlang' : 'Blok muddatini tanlang'}
+                    </h2>
+                    <p className="mt-1 text-sm text-[#A7A0B5]">{accountActionModal.userName}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAccountActionModal(null)}
+                    aria-label="Oynani yopish"
+                    className="rounded-xl border border-white/10 p-2 text-slate-300 transition hover:bg-white/10"
+                  >
+                    <X size={17} />
+                  </button>
+                </div>
+                <div className="mt-5 grid grid-cols-1 gap-2">
+                  {(accountActionModal.type === 'subscription' ? SUBSCRIPTION_DURATIONS : BAN_DURATIONS).map(duration => (
+                    <button
+                      key={duration.label}
+                      type="button"
+                      onClick={() => applyAccountAction(accountActionModal.userId, accountActionModal.type, duration)}
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                        accountActionModal.type === 'subscription'
+                          ? 'border-[#C8A66A]/20 bg-[#C8A66A]/5 text-[#E5CF9B] hover:border-[#C8A66A]/50 hover:bg-[#C8A66A]/10'
+                          : 'border-red-400/15 bg-red-500/5 text-red-200 hover:border-red-400/40 hover:bg-red-500/10'
+                      }`}
+                    >
+                      <span>{duration.label}</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  ))}
+                  {accountActionModal.type === 'ban' && users.find(user => user.id === accountActionModal.userId)?.ban && (
+                    <button
+                      type="button"
+                      onClick={() => applyAccountAction(accountActionModal.userId, 'unban')}
+                      className="mt-1 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/15"
+                    >
+                      Ban ni bekor qilish
+                    </button>
+                  )}
+                </div>
+              </section>
+            </div>
           )}
 
         </main>
@@ -2123,7 +2731,6 @@ export default function App() {
   // ============================================================================
 
   // USER MOBILE APPLICATION VIEW
-
   // ============================================================================
 
   return (
@@ -2143,7 +2750,42 @@ export default function App() {
         </div>
 
       )}
-
+      {dailyRewardModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="daily-reward-title"
+            className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-amber-300/30 bg-gradient-to-br from-[#2B2115] via-[#1D1729] to-[#100D18] p-7 text-center shadow-[0_0_60px_rgba(251,191,36,0.2)]"
+          >
+            <div className="pointer-events-none absolute -right-10 -top-12 h-36 w-36 rounded-full bg-amber-400/15 blur-3xl" />
+            <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-300/30 bg-amber-400/10 text-4xl shadow-[0_0_25px_rgba(251,191,36,0.15)]">
+              🎁
+            </div>
+            <h2 id="daily-reward-title" className="relative mt-5 text-xl font-extrabold text-amber-100">
+              Tabriklaymiz!
+            </h2>
+            <p className="relative mt-2 text-sm leading-relaxed text-white">
+              Bugungi bonusingiz: <span className="font-extrabold text-amber-300">+{dailyRewardModal.coins} Coin</span>
+            </p>
+            <p className="relative mt-1 text-xs text-amber-100/70">
+              {dailyRewardModal.streakDay}-kunlik kirish bonusi
+            </p>
+            {dailyRewardModal.streakDay === 1 && (
+              <p className="relative mt-4 rounded-xl border border-amber-300/15 bg-black/20 p-3 text-xs leading-relaxed text-amber-100/90">
+                Ajoyib boshlanish! Har kuni kirib ko'proq Coin yig'ing va peshqadam bo'ling!
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => setDailyRewardModal(null)}
+              className="relative mt-6 w-full rounded-xl bg-gradient-to-r from-amber-300 to-yellow-500 py-3 text-sm font-extrabold text-[#21170B] shadow-lg shadow-amber-500/20 transition hover:brightness-110"
+            >
+              Bonusni qabul qilish
+            </button>
+          </section>
+        </div>
+      )}
 
 
       {/* 9:16 Fullscreen Ad Modal with 3s Timer */}
@@ -2221,8 +2863,88 @@ export default function App() {
       )}
 
 
+      {coinPurchaseCoins !== null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setCoinPurchaseCoins(null)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="coin-purchase-title"
+            className="relative w-full max-w-md overflow-hidden rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#211832] via-[#15111F] to-[#100D18] p-5 shadow-[0_0_60px_rgba(139,92,246,0.22)] animate-in zoom-in-95 duration-200 sm:p-6"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-violet-500/15 blur-3xl" />
+            <div className="relative">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-500/15 text-violet-300 ring-1 ring-violet-300/25">
+                    <MessageSquare size={21} />
+                  </div>
+                  <div>
+                    <h2 id="coin-purchase-title" className="text-lg font-extrabold text-white">
+                      Adminga yozish uchun shablon
+                    </h2>
+                    <p className="mt-0.5 text-xs text-[#A7A0B5]">Tanlangan paket: {coinPurchaseCoins} Coin</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Oynani yopish"
+                  onClick={() => setCoinPurchaseCoins(null)}
+                  className="rounded-xl p-2 text-[#A7A0B5] transition hover:bg-white/10 hover:text-white"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
-      {/* Click Payment Modal */}
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <p className="text-sm leading-relaxed text-slate-200">{coinPurchaseMessage}</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      if (!navigator.clipboard?.writeText) {
+                        throw new Error('Clipboard API is unavailable in this browser context.');
+                      }
+                      await navigator.clipboard.writeText(coinPurchaseMessage);
+                      showToast('Nusxa olindi!');
+                    } catch (error) {
+                      console.error('Could not copy the coin purchase message:', error);
+                      showToast("Nusxa olib bo'lmadi. Brauzer ruxsatlarini tekshiring.", 'error');
+                    }
+                  }}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-400/20"
+                >
+                  <Copy size={14} />
+                  Nusxa olish
+                </button>
+              </div>
+
+              <a
+                href="https://t.me/SHAHBOZBE0770"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-blue-950/30 transition hover:brightness-110"
+              >
+                <Send size={17} />
+                Telegram orqali adminga yozish
+              </a>
+              <button
+                type="button"
+                onClick={() => setCoinPurchaseCoins(null)}
+                className="mt-2 w-full rounded-xl px-4 py-2.5 text-xs font-semibold text-[#A7A0B5] transition hover:bg-white/5 hover:text-white"
+              >
+                Yopish
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+
+      {/* Click and Payme Payment Modal */}
 
       {paymentModal && (
 
@@ -2234,13 +2956,12 @@ export default function App() {
 
               <div className="flex items-center gap-2">
 
-                <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center font-extrabold text-white text-xs">
-
-                  CLICK
-
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded-lg bg-blue-500 px-2 py-2 font-extrabold text-white text-[10px]">CLICK</span>
+                  <span className="rounded-lg bg-sky-500 px-2 py-2 font-extrabold text-white text-[10px]">PAYME</span>
                 </div>
 
-                <span className="font-bold text-sm">Xavfsiz To'lov Tizimi</span>
+                <span className="font-bold text-sm">To'lov usulini tanlang</span>
 
               </div>
 
@@ -2258,9 +2979,14 @@ export default function App() {
 
               <div className="text-xs text-[#A7A0B5]">{paymentModal.title}</div>
 
-              <div className="text-2xl font-extrabold text-[#FBBF24] mt-1">${paymentModal.amountUSD.toFixed(2)}</div>
-
-              <div className="text-[11px] text-[#A7A0B5] mt-0.5">≈ {(paymentModal.amountUSD * 12800).toLocaleString()} UZS</div>
+              {paymentModal.amountUZS ? (
+                <div className="text-2xl font-extrabold text-[#FBBF24] mt-1">{paymentModal.amountUZS.toLocaleString('uz-UZ')} so'm</div>
+              ) : (
+                <>
+                  <div className="text-2xl font-extrabold text-[#FBBF24] mt-1">${paymentModal.amountUSD.toFixed(2)}</div>
+                  <div className="text-[11px] text-[#A7A0B5] mt-0.5">≈ {(paymentModal.amountUSD * 12800).toLocaleString()} UZS</div>
+                </>
+              )}
 
             </div>
 
@@ -2364,8 +3090,6 @@ export default function App() {
 
       )}
 
-
-
       {/* Mobile Container */}
 
       <div className="max-w-md mx-auto relative min-h-screen shadow-2xl bg-[#0B0912] sm:border-x sm:border-white/10 overflow-hidden">
@@ -2408,21 +3132,26 @@ export default function App() {
 
           <div className="flex items-center gap-2">
 
-            {isLoggedIn && (
+            <button
+              onClick={() => { setSubView(null); setActiveTab('profil'); }}
+              className="flex max-w-[125px] items-center gap-1.5 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-2 text-left transition hover:bg-white/10"
+              aria-label="Profilni ochish"
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/20 text-[10px] font-bold text-violet-200">{currentUserInitials}</span>
+              <span className="truncate text-[10px] font-semibold text-slate-200">{currentUser.name}</span>
+            </button>
 
-              <button 
+            <button
 
-                onClick={() => setSubView('shop')}
+              onClick={() => setSubView('shop')}
 
-                className="flex items-center gap-1.5 bg-[#1D1729] hover:bg-[#261E36] px-3 py-1.5 rounded-full border border-[#FBBF24]/30 transition-all">
+              className="flex items-center gap-1.5 bg-[#1D1729] hover:bg-[#261E36] px-3 py-1.5 rounded-full border border-[#FBBF24]/30 transition-all">
 
-                <span className="w-4 h-4 rounded-full bg-[#FBBF24] text-black font-extrabold text-[10px] flex items-center justify-center">C</span>
+              <span className="w-4 h-4 rounded-full bg-[#FBBF24] text-black font-extrabold text-[10px] flex items-center justify-center">C</span>
 
-                <span className="font-bold text-xs text-[#FBBF24]">{currentUser.coins}</span>
+              <span className="font-bold text-xs text-[#FBBF24]">{currentUser.coins}</span>
 
-              </button>
-
-            )}
+            </button>
 
             <button 
 
@@ -2477,6 +3206,16 @@ export default function App() {
 
 
               <h2 className="text-xl font-bold">Yangi Test Yaratish</h2>
+
+              {reachedDailyTestCreationLimit ? (
+                <div role="alert" className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-200">
+                  Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!
+                </div>
+              ) : (
+                <p className="text-xs text-[#A7A0B5]">
+                  Bugungi test yaratish: {dailyTestCreationCount}/2
+                </p>
+              )}
 
 
 
@@ -2711,8 +3450,9 @@ export default function App() {
                 <button 
 
                   onClick={handlePublishTest}
+                  disabled={reachedDailyTestCreationLimit}
 
-                  className="w-full py-4 rounded-xl bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white font-bold shadow-[0_0_20px_rgba(139,92,246,0.5)]">
+                  className="w-full py-4 rounded-xl bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white font-bold shadow-[0_0_20px_rgba(139,92,246,0.5)] disabled:cursor-not-allowed disabled:opacity-50">
 
                   Testni Faollashtirish (30 soat)
 
@@ -2730,7 +3470,7 @@ export default function App() {
 
             <div className="space-y-6 animate-in fade-in duration-300">
 
-              <button onClick={() => setSubView(null)} className="flex items-center gap-1 text-sm text-[#A7A0B5] hover:text-white">
+              <button onClick={() => { setSubView(null); setTestStartedAt(null); }} className="flex items-center gap-1 text-sm text-[#A7A0B5] hover:text-white">
 
                 <ArrowLeft size={18} /> Testdan chiqish
 
@@ -2744,12 +3484,13 @@ export default function App() {
 
                   <div className="flex justify-between items-center text-xs text-[#A7A0B5]">
 
-                    <span>Muallif: <strong className="text-white">{activeTestToSolve.creatorName}</strong></span>
+                    <span>Muallif: <strong className="text-white">{activeTestToSolve.creatorId === currentUser.id ? currentUser.name : activeTestToSolve.creatorName}</strong></span>
 
                     <span className="bg-[#8B5CF6]/20 text-[#C4B5FD] px-2.5 py-1 rounded-full font-bold">
-
                       {currentQIndex + 1} / {activeTestToSolve.questions.length}
-
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-black/30 px-2.5 py-1 font-mono text-white/80">
+                      <Clock size={12} /> {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
                     </span>
 
                   </div>
@@ -2790,7 +3531,7 @@ export default function App() {
 
               ) : (
 
-                <div className="bg-gradient-to-b from-[#8B5CF6]/20 to-[#1D1729] p-6 rounded-3xl border border-[#8B5CF6]/40 text-center space-y-5">
+                <div role="status" aria-live="polite" className="mx-auto w-full max-w-lg bg-gradient-to-b from-[#8B5CF6]/20 to-[#1D1729] p-6 rounded-3xl border border-[#8B5CF6]/40 text-center space-y-5">
 
                   <div className="w-20 h-20 rounded-full bg-[#8B5CF6]/20 border-2 border-[#8B5CF6] mx-auto flex items-center justify-center text-2xl font-extrabold text-white shadow-[0_0_25px_rgba(139,92,246,0.5)]">
 
@@ -2809,6 +3550,16 @@ export default function App() {
                     </p>
 
                   </div>
+
+                  {testResult.isSpam ? (
+                    <div role="alert" className="rounded-2xl border border-red-400/40 bg-red-500/15 p-4 text-sm font-bold leading-relaxed text-red-300">
+                      Siz savollarni o'qimasdan juda tez belgiladingiz. Jarima: -30 Coin va -30 XP!
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-300">
+                      Mukofot: +{testResult.rewardXp} XP va +{testResult.rewardCoins} Coin
+                    </div>
+                  )}
 
                   <div className="flex gap-3">
 
@@ -2842,6 +3593,20 @@ export default function App() {
 
           )}
 
+          {subView === 'solve_test' && !activeTestToSolve && (
+            <section role="alert" className="mx-auto max-w-lg rounded-3xl border border-amber-400/25 bg-[#1D1729] p-6 text-center shadow-[0_0_30px_rgba(251,191,36,0.08)]">
+              <h2 className="text-xl font-extrabold">Test natijasi ko'rsatilmayapti</h2>
+              <p className="mt-2 text-sm text-[#A7A0B5]">
+                Test ma'lumotlari topilmadi. Testlar ro'yxatiga qaytib, qayta urinib ko'ring.
+              </p>
+              <button
+                onClick={() => { setSubView(null); setActiveTab('testlar'); }}
+                className="mt-5 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-violet-500"
+              >
+                Testlarga qaytish
+              </button>
+            </section>
+          )}
 
 
           {subView === 'test_details' && selectedTestDetails && (
@@ -2950,126 +3715,97 @@ export default function App() {
 
 
 
-              <h2 className="text-xl font-bold">ANONI COIN Do'koni</h2>
-
-
-
-              {/* Buy Coins via Click ($1 = 50 Coins, max 500) */}
-
-              <div className="bg-gradient-to-r from-amber-500/20 to-[#1D1729] p-4 rounded-2xl border border-[#FBBF24]/40 space-y-3">
-
-                <div className="flex justify-between items-center">
-
-                  <span className="font-bold text-sm text-[#FBBF24]">Click orqali Coin Xarid Qilish</span>
-
-                  <span className="text-xs text-[#A7A0B5]">$1 = 50 Coin</span>
-
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300/25 to-violet-500/20 text-amber-300 shadow-[0_0_24px_rgba(251,191,36,0.16)]">
+                  <ShoppingBag size={21} />
                 </div>
-
-                <div className="grid grid-cols-3 gap-2">
-
-                  {[
-
-                    { coins: 50, usd: 1 },
-
-                    { coins: 150, usd: 3 },
-
-                    { coins: 500, usd: 10 }
-
-                  ].map(pack => (
-
-                    <button
-
-                      key={pack.coins}
-
-                      onClick={() => setPaymentModal({ title: `${pack.coins} ANONI COIN Xaridi`, amountUSD: pack.usd, type: 'COINS', coinsAmount: pack.coins })}
-
-                      className="bg-black/40 hover:bg-[#FBBF24]/20 border border-[#FBBF24]/30 p-2.5 rounded-xl text-center transition-all">
-
-                      <div className="font-extrabold text-sm text-[#FBBF24]">+{pack.coins}</div>
-
-                      <div className="text-[11px] text-white mt-0.5">${pack.usd}</div>
-
-                    </button>
-
-                  ))}
-
+                <div>
+                  <h2 className="text-xl font-extrabold">ANONI COIN Do'koni</h2>
+                  <p className="text-xs text-[#A7A0B5]">Maxsus statuslar — profilingizga o'zgacha jilo bering</p>
                 </div>
-
               </div>
 
-
-
-              {/* Cosmetics List */}
+              <div className="relative overflow-hidden rounded-2xl border border-[#FBBF24]/40 bg-gradient-to-br from-amber-500/15 via-[#1D1729] to-violet-500/10 p-4 shadow-[0_0_28px_rgba(251,191,36,0.08)]">
+                <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-amber-300/10 blur-2xl" />
+                <div className="relative space-y-3">
+                  <div className="flex items-center gap-2">
+                    <CreditCard size={17} className="text-amber-300" />
+                    <span className="font-extrabold text-sm text-[#FBBF24]">Click & Payme orqali Coin Xarid Qilish</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { coins: 100, amountUZS: 15000 },
+                      { coins: 300, amountUZS: 40000 },
+                      { coins: 700, amountUZS: 80000 }
+                    ].map(pack => (
+                      <button
+                        key={pack.coins}
+                        onClick={() => setCoinPurchaseCoins(pack.coins)}
+                        className="rounded-xl border border-amber-300/25 bg-black/35 p-2.5 text-center transition-all hover:-translate-y-0.5 hover:border-amber-300/60 hover:bg-amber-400/10 hover:shadow-[0_0_18px_rgba(251,191,36,0.12)]">
+                        <div className="font-extrabold text-sm text-[#FBBF24]">+{pack.coins} Coin</div>
+                        <div className="mt-1 text-[10px] font-semibold text-white">{pack.amountUZS.toLocaleString('uz-UZ')} so'm</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
               <div className="space-y-3">
-
                 {SHOP_ITEMS.map(item => {
-
                   const owned = currentUser.ownedItems.includes(item.id);
+                  const equipped = currentUser.equipped.status === item.id;
+                  const Icon = item.icon;
+                  const SecondaryIcon = item.secondaryIcon;
 
                   return (
+                    <div key={item.id} className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-r from-[#1D1729] via-[#1D1729] to-[#15111F] p-3.5 transition-all hover:-translate-y-0.5 hover:border-white/20 ${equipped ? 'border-amber-300/40 shadow-[0_0_20px_rgba(251,191,36,0.08)]' : 'border-white/10'}`}>
+                      <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/[0.03] blur-2xl transition-all group-hover:bg-violet-400/[0.08]" />
+                      <div className="relative flex items-center gap-3">
+                        <div className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${item.glowClass} shadow-[0_0_20px_rgba(255,255,255,0.04)]`}>
+                          <Icon size={23} className={`${item.iconClass} ${item.effectClass}`} />
+                          {SecondaryIcon && <SecondaryIcon size={12} className="absolute -right-1 -top-1 text-amber-200 drop-shadow-[0_0_7px_rgba(251,191,36,0.9)] animate-pulse" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-bold text-sm text-white">{item.name}</span>
+                            {(item.id === 'status_vip_check' || item.id === 'status_gold_check') && (
+                              <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wide ${item.id === 'status_gold_check' ? 'bg-amber-300/15 text-amber-200' : 'bg-white/10 text-slate-100'}`}>
+                                {item.id === 'status_gold_check' ? 'ELITE' : 'VIP'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[10px] leading-relaxed text-[#A7A0B5]">{item.description}</p>
+                          <div className="mt-1 text-[10px] font-extrabold text-amber-300">{item.price.toLocaleString('uz-UZ')} Coin</div>
+                        </div>
+                        <button
+                          disabled={equipped}
+                          onClick={() => {
+                            if (owned) {
+                              setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, equipped: { ...u.equipped, [item.category]: item.value } } : u));
+                              showToast(`${item.name} profilga o'rnatildi!`);
+                              return;
+                            }
 
-                    <div key={item.id} className="bg-[#1D1729] p-4 rounded-2xl border border-white/10 flex justify-between items-center">
+                            if (currentUser.coins < item.price) {
+                              showToast("Coin yetarli emas! Challenge bajaring yoki Click & Payme orqali xarid qiling.", "error");
+                              return;
+                            }
 
-                      <div>
-
-                        <div className="font-bold text-sm">{item.name}</div>
-
-                        <div className="text-xs text-[#A7A0B5] mt-0.5">Narxi: <strong className="text-[#FBBF24]">{item.price} Coin</strong></div>
-
+                            updateUserBalance(currentUser.id, 0, -item.price, `Do'kondan xarid: ${item.name}`);
+                            setUsers(prev => prev.map(u => u.id === currentUser.id ? {
+                              ...u,
+                              ownedItems: [...u.ownedItems, item.id],
+                              equipped: { ...u.equipped, [item.category]: item.value }
+                            } : u));
+                            showToast(`${item.name} xarid qilindi va o'rnatildi!`);
+                          }}
+                          className={`shrink-0 rounded-xl px-3 py-2 text-[10px] font-extrabold transition-all ${equipped ? 'cursor-default bg-amber-300/15 text-amber-200' : owned ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' : 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_4px_16px_rgba(139,92,246,0.2)] hover:brightness-110'}`}>
+                          {equipped ? 'Faol' : owned ? "O'rnatish" : 'Sotib olish'}
+                        </button>
                       </div>
-
-                      <button
-
-                        onClick={() => {
-
-                          if (owned) {
-
-                            setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, equipped: { ...u.equipped, [item.category]: item.value } } : u));
-
-                            showToast(`${item.name} profilga o'rnatildi!`);
-
-                            return;
-
-                          }
-
-                          if (currentUser.coins < item.price) {
-
-                            showToast("Coin yetarli emas! Challenge o'ynang yoki Click orqali xarid qiling.", "error");
-
-                            return;
-
-                          }
-
-                          updateUserBalance(currentUser.id, 0, -item.price, `Do'kondan xarid: ${item.name}`);
-
-                          setUsers(prev => prev.map(u => u.id === currentUser.id ? {
-
-                            ...u,
-
-                            ownedItems: [...u.ownedItems, item.id],
-
-                            equipped: { ...u.equipped, [item.category]: item.value }
-
-                          } : u));
-
-                          showToast(`${item.name} xarid qilindi va o'rnatildi!`);
-
-                        }}
-
-                        className={`px-4 py-2 rounded-xl text-xs font-bold ${owned ? 'bg-green-500/20 text-green-400' : 'bg-[#8B5CF6] text-white'}`}>
-
-                        {owned ? 'O\'rnatish' : `${item.price} Coin`}
-
-                      </button>
-
                     </div>
-
                   );
-
                 })}
-
               </div>
 
             </div>
@@ -3228,45 +3964,17 @@ export default function App() {
 
             <div className="flex flex-col gap-5 animate-in fade-in duration-300">
 
-              {!isLoggedIn ? (
-
-                <section className="text-center py-6 flex flex-col gap-4 bg-[#1D1729] p-6 rounded-3xl border border-white/10">
-
-                  <h2 className="text-2xl font-extrabold text-[#F8FAFC] leading-snug">
-
-                    Do'stlaringiz sizni qanchalik biladi?
-
-                  </h2>
-
-                  <p className="text-[#A7A0B5] text-xs px-2">
-
-                    Test yarating, ulashing va do'stlaringiz haqiqiy fikrini bilib oling. Barcha ishtirokchilar Telegram orqali tasdiqlanadi.
-
-                  </p>
-
-                  <button 
-
-                    onClick={() => { setIsLoggedIn(true); showToast("Telegram orqali muvaffaqiyatli kirdingiz!"); }}
-
-                    className="mt-2 w-full bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white py-3.5 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.5)] active:scale-95 transition-all">
-
-                    <Send size={18} />
-
-                    <span>Telegram orqali kirish</span>
-
-                  </button>
-
-                </section>
-
-              ) : (
-
-                <section className="bg-[#1D1729] rounded-3xl p-5 border border-white/10 flex flex-col gap-4">
+              <section className="bg-[#1D1729] rounded-3xl p-5 border border-white/10 flex flex-col gap-4">
 
                   <div className="flex items-center justify-between">
 
                     <div className="flex items-center gap-3">
 
-                      <img src={currentUser.avatar} alt="Avatar" className={`w-12 h-12 rounded-full border-2 ${currentUser.equipped.frame}`} />
+                      {currentUser.avatar ? (
+                        <img src={currentUser.avatar} alt={`${currentUser.name} avatari`} className={`w-12 h-12 rounded-full border-2 object-cover ${currentUser.equipped.frame}`} />
+                      ) : (
+                        <div className={`flex h-12 w-12 items-center justify-center rounded-full border-2 bg-violet-500/15 text-sm font-bold text-violet-200 ${currentUser.equipped.frame}`}>{currentUserInitials}</div>
+                      )}
 
                       <div>
 
@@ -3275,8 +3983,23 @@ export default function App() {
                           {currentUser.name}
 
                         </div>
+                        {currentUser.isPro && (
+                          <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#C8A66A]/30 bg-[#C8A66A]/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-[#C8A66A]">
+                            <Crown size={10} /> PRO OBUNA
+                          </div>
+                        )}
 
-                        <div className="text-xs text-[#A7A0B5]">ID: {currentUser.id}</div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[#A7A0B5]">
+                          <span>ID: {registeredProfile.publicId}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPublicId(registeredProfile.publicId)}
+                            aria-label="Foydalanuvchi ID sini nusxalash"
+                            className="rounded p-0.5 text-violet-300 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <Copy size={12} />
+                          </button>
+                        </div>
 
                       </div>
 
@@ -3318,9 +4041,7 @@ export default function App() {
 
                   </div>
 
-                </section>
-
-              )}
+              </section>
 
 
 
@@ -3464,12 +4185,24 @@ export default function App() {
 
               <div className="flex justify-between items-center">
 
-                <h2 className="text-xl font-bold">Testlar Bo'limi</h2>
+                <div>
+                  <h2 className="text-xl font-bold">Testlar Bo'limi</h2>
+                  <p className="mt-1 text-[10px] text-[#A7A0B5]">
+                    Haftalik mukofot: {Math.min(weeklyTestCompletions, 3)}/3
+                    {weeklyTestCompletions >= 3 ? ' • Keyingi yechimlar: 0 XP + 30 Coin' : ' • Dastlabki 3 yechim mukofotli'}
+                  </p>
+                </div>
 
                 <button 
 
-                  onClick={() => setSubView('create_test')}
-
+                  onClick={() => {
+                    if (reachedDailyTestCreationLimit) {
+                      showToast("Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!", "error");
+                      return;
+                    }
+                    setSubView('create_test');
+                  }}
+                  disabled={reachedDailyTestCreationLimit}
                   className="bg-[#8B5CF6] hover:bg-[#7C3AED] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_rgba(139,92,246,0.4)]">
 
                   <Plus size={16} /> Test Yaratish
@@ -3478,6 +4211,17 @@ export default function App() {
 
               </div>
 
+              {reachedDailyTestCreationLimit && (
+                <div role="alert" className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-200">
+                  Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!
+                </div>
+              )}
+
+              {!reachedDailyTestCreationLimit && (
+                <p className="text-[10px] text-[#A7A0B5]">
+                  Bugungi test yaratish: {dailyTestCreationCount}/2
+                </p>
+              )}
 
 
               <div className="space-y-3">
@@ -3498,12 +4242,16 @@ export default function App() {
 
                           <span className="text-[10px] text-[#C4B5FD] uppercase font-bold">
 
-                            {isMine ? 'Sizning testingiz' : `Muallif: ${test.creatorName}`}
+                            {isMine ? 'Sizning testingiz' : `Muallif: ${test.creatorId === currentUser.id ? currentUser.name : test.creatorName}`}
 
                           </span>
 
                           <h3 className="font-bold text-base mt-0.5">{test.title}</h3>
-
+                          {test.popularRewardGranted && (
+                            <span className="mt-1 inline-flex rounded-full border border-amber-300/30 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-200">
+                              🏆 Ommabop test
+                            </span>
+                          )}
                         </div>
 
                         <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded flex items-center gap-1">
@@ -3562,6 +4310,12 @@ export default function App() {
 
                 })}
 
+                {tests.length === 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-[#1D1729] p-5 text-center text-sm text-[#A7A0B5]">
+                    Hozircha testlar yo'q. Birinchi testni o'zingiz yarating!
+                  </div>
+                )}
+
               </div>
 
             </div>
@@ -3577,26 +4331,7 @@ export default function App() {
             <div className="space-y-5 animate-in fade-in duration-300">
 
               <h2 className="text-xl font-bold">Global XP Reyting</h2>
-
-
-
-              {/* 11-Level Special Gift Banner */}
-
-              <div className="bg-gradient-to-r from-red-500/20 via-[#8B5CF6]/20 to-[#1D1729] p-4 rounded-2xl border border-red-500/30 flex items-center gap-4">
-
-                <img src={settings.level11GiftPhoto} alt="Gift" className="w-16 h-16 rounded-xl object-cover border border-white/20" />
-
-                <div>
-
-                  <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded font-extrabold uppercase">11-Daraja Sovrini</span>
-
-                  <h3 className="font-bold text-sm mt-1">{settings.level11GiftTitle}</h3>
-
-                  <p className="text-[11px] text-[#A7A0B5]">8 000 XP to'plab 11-darajani tugatganlarga beriladi!</p>
-
-                </div>
-
-              </div>
+              <p className="text-xs text-[#A7A0B5]">Bu qurilmada ro'yxatdan o'tgan foydalanuvchi reytingi.</p>
 
 
 
@@ -3604,25 +4339,16 @@ export default function App() {
 
               <div className="space-y-3">
 
-                {sortedUsersByXP.map((u, idx) => {
-
+                {leaderboardUsers.map((u, idx) => {
+                  const isAdminProfile = u.id === ADMIN_PROFILE.id;
+                  const isCurrentUser = u.id === currentUser.id;
                   const lvl = getUserLevelInfo(u.xp, u.proMonths, idx === 0);
 
                   return (
 
-                    <div 
-
-                      key={u.id} 
-
-                      onClick={() => {
-
-                        setCurrentUserId(u.id);
-
-                        showToast(`Demo: Hozir ${u.name} profiliga o'tdingiz!`);
-
-                      }}
-
-                      className={`p-4 rounded-2xl border flex items-center justify-between cursor-pointer transition-all ${u.id === currentUser.id ? 'bg-[#8B5CF6]/15 border-[#8B5CF6]' : 'bg-[#1D1729] border-white/10 hover:border-white/30'}`}>
+                    <div
+                      key={u.id}
+                      className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${isAdminProfile ? 'bg-[#C8A66A]/10 border-[#C8A66A] shadow-[0_0_24px_rgba(200,166,106,0.15)]' : isCurrentUser ? 'bg-[#8B5CF6]/15 border-[#8B5CF6]' : 'bg-[#1D1729] border-white/10'}`}>
 
                       <div className="flex items-center gap-3">
 
@@ -3632,13 +4358,23 @@ export default function App() {
 
                         </div>
 
-                        <img src={u.avatar} alt={u.name} className={`w-10 h-10 rounded-full border-2 ${u.equipped.frame}`} />
+                        {isAdminProfile ? (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#C8A66A] bg-[#C8A66A]/15 text-xl text-[#C8A66A] shadow-[0_0_14px_rgba(200,166,106,0.25)]">
+                            👑
+                          </div>
+                        ) : u.avatar ? (
+                          <img src={u.avatar} alt={`${u.name} avatari`} className={`w-10 h-10 rounded-full border-2 object-cover ${u.equipped.frame}`} />
+                        ) : (
+                          <div className={`flex h-10 w-10 items-center justify-center rounded-full border-2 bg-violet-500/15 text-xs font-bold text-violet-200 ${u.equipped.frame}`}>
+                            {isCurrentUser ? currentUserInitials : u.name.split(/\s+/).map(namePart => namePart[0]).slice(0, 2).join('').toUpperCase()}
+                          </div>
+                        )}
 
                         <div>
 
                           <div className="font-bold text-sm flex items-center gap-1.5">
-
-                            <span className={u.equipped.nameColor}>{u.name}</span>
+                            <span className={`${u.equipped.nameColor} ${isAdminProfile ? 'tracking-[0.12em]' : ''}`}>{u.name}</span>
+                            {isAdminProfile && <BadgeCheck size={14} className="text-[#C8A66A]" aria-label="Tasdiqlangan admin" />}
 
                             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${lvl.color === 'red' ? 'bg-red-500/20 text-red-400' : lvl.color === 'green' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
 
@@ -3649,14 +4385,27 @@ export default function App() {
                           </div>
 
                           <div className="text-xs text-[#A7A0B5]">{u.xp} XP</div>
+                          <div className={`mt-1 flex items-center gap-1 text-[10px] ${isAdminProfile ? 'text-[#C8A66A]' : 'text-[#A7A0B5]'}`}>
+                            <span>ID: {isAdminProfile ? ADMIN_PUBLIC_ID : u.publicId || (isCurrentUser ? registeredProfile.publicId : '—')}</span>
+                            {(isAdminProfile || isCurrentUser) && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPublicId(isAdminProfile ? ADMIN_PUBLIC_ID : registeredProfile.publicId)}
+                                aria-label={`${u.name} ID sini nusxalash`}
+                                className="rounded p-0.5 transition hover:bg-white/10 hover:text-white"
+                              >
+                                <Copy size={11} />
+                              </button>
+                            )}
+                          </div>
 
                         </div>
 
                       </div>
 
-                      <div className="text-xs text-[#A7A0B5]">
+                      <div className={`text-xs ${isAdminProfile ? 'font-bold text-[#C8A66A]' : 'text-[#A7A0B5]'}`}>
 
-                        {u.id === currentUser.id ? 'Siz' : 'Profilni tanlash'}
+                        {isAdminProfile ? 'ADMIN' : isCurrentUser ? 'Siz' : 'Foydalanuvchi'}
 
                       </div>
 
@@ -3798,45 +4547,93 @@ export default function App() {
 
               <div className="bg-[#1D1729] p-6 rounded-3xl border border-white/10 text-center relative overflow-hidden">
 
-                {/* Avatar (Unlocked at Level 2+) */}
-
                 <div className="relative w-24 h-24 mx-auto mb-3">
-
-                  {userLevel.level >= 2 ? (
-
-                    <img 
-
-                      src={currentUser.avatar} 
-
-                      alt="avatar" 
-
-                      className={`w-full h-full rounded-full object-cover border-4 ${currentUser.equipped.frame} ${currentUser.equipped.anim}`} 
-
+                  {currentUser.avatar ? (
+                    <img
+                      src={currentUser.avatar}
+                      alt={`${currentUser.name} avatari`}
+                      className={`h-full w-full rounded-full border-4 object-cover ${currentUser.equipped.frame} ${currentUser.equipped.anim}`}
                     />
-
                   ) : (
-
-                    <div className="w-full h-full rounded-full bg-black/50 border-2 border-dashed border-white/20 flex flex-col items-center justify-center text-xs text-[#A7A0B5]">
-
-                      <Lock size={20} />
-
-                      <span className="text-[9px] mt-1">2-LVLda ochiladi</span>
-
+                    <div className={`flex h-full w-full items-center justify-center rounded-full border-4 bg-violet-500/15 text-2xl font-bold text-violet-200 ${currentUser.equipped.frame} ${currentUser.equipped.anim}`}>
+                      {currentUserInitials}
                     </div>
-
                   )}
+                </div>
 
+                <div
+                  onDragOver={event => {
+                    event.preventDefault();
+                    setIsAvatarDragOver(true);
+                  }}
+                  onDragLeave={event => {
+                    event.preventDefault();
+                    setIsAvatarDragOver(false);
+                  }}
+                  onDrop={event => {
+                    event.preventDefault();
+                    setIsAvatarDragOver(false);
+                    saveAvatarFile(event.dataTransfer.files?.[0]);
+                  }}
+                  className={`mx-auto mb-5 max-w-sm rounded-2xl border border-dashed p-4 transition ${isAvatarDragOver ? 'border-amber-300 bg-amber-400/10' : 'border-amber-300/30 bg-black/20'}`}
+                >
+                  <p className="text-xs text-amber-100/90">Profil rasmi uchun rasmni shu yerga tashlang</p>
+                  <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-400/20">
+                    <ImageIcon size={15} />
+                    Rasm tanlash
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={event => {
+                        saveAvatarFile(event.target.files?.[0]);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <p className="mt-2 text-[10px] text-[#A7A0B5]">Rasm 1.5 MB gacha. Faqat shu brauzerda saqlanadi.</p>
                 </div>
 
 
 
-                <h2 className={`text-2xl font-bold ${currentUser.equipped.nameColor} ${currentUser.equipped.font}`}>
+                <div className="flex items-center justify-center gap-2">
+                  {equippedStatus && (() => {
+                    const StatusIcon = equippedStatus.icon;
+                    const SecondaryStatusIcon = equippedStatus.secondaryIcon;
+                    return (
+                      <span className={`relative inline-flex h-7 w-7 items-center justify-center rounded-full ${equippedStatus.glowClass}`}>
+                        <StatusIcon size={16} className={`${equippedStatus.iconClass} ${equippedStatus.effectClass}`} />
+                        {SecondaryStatusIcon && <SecondaryStatusIcon size={9} className="absolute -right-0.5 -top-0.5 text-amber-200 drop-shadow-[0_0_5px_rgba(251,191,36,0.9)]" />}
+                      </span>
+                    );
+                  })()}
+                  <h2 className={`text-2xl font-bold ${currentUser.equipped.nameColor} ${currentUser.equipped.font}`}>
+                    {currentUser.name}
+                  </h2>
+                  {currentUser.isPro && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[#C8A66A]/30 bg-[#C8A66A]/10 px-2 py-1 text-[9px] font-extrabold tracking-wider text-[#C8A66A]">
+                      <Crown size={11} /> PRO
+                    </span>
+                  )}
+                </div>
+                {currentUser.isPro && currentUser.subscriptionUntil && (
+                  <p className="mt-1 text-[10px] text-[#C8A66A]">
+                    {formatLocalDateTime(Number(currentUser.subscriptionUntil))} gacha
+                  </p>
+                )}
 
-                  {currentUser.name}
-
-                </h2>
-
-                <p className="text-xs text-[#A7A0B5] mt-0.5">@{currentUser.username} • ID: {currentUser.id}</p>
+                <p className="text-xs text-[#A7A0B5] mt-0.5">{currentUser.age} yosh</p>
+                <div className="mt-1 inline-flex items-center gap-1 text-xs text-[#A7A0B5]">
+                  <span>ID: {registeredProfile.publicId}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPublicId(registeredProfile.publicId)}
+                    aria-label="Foydalanuvchi ID sini nusxalash"
+                    className="rounded p-1 text-violet-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <Copy size={13} />
+                  </button>
+                </div>
 
 
 
@@ -3885,6 +4682,25 @@ export default function App() {
               </div>
 
 
+
+              {achievementNotifications.length > 0 && (
+                <section className="space-y-3" aria-label="Yutuqlar bildirishnomalari">
+                  <h3 className="px-1 text-sm font-bold uppercase text-amber-200">Yutuqlar va bildirishnomalar</h3>
+                  {achievementNotifications.map(notification => (
+                    <article key={notification.id} className="rounded-2xl border border-amber-400/25 bg-gradient-to-br from-amber-500/10 to-[#1D1729] p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/15 text-amber-200">
+                          <Trophy size={18} />
+                        </span>
+                        <div>
+                          <h4 className="text-sm font-bold text-amber-100">{notification.title}</h4>
+                          <p className="mt-1 text-xs leading-relaxed text-[#D1CADC]">{notification.message}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )}
 
               {/* Transactions History */}
 
