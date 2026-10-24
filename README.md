@@ -1,16 +1,29 @@
-# React + Vite
+# ANONI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account profiles, balances, moderation status, shop ownership, and the global XP leaderboard.
 
-Currently, two official plugins are available:
+## Supabase setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Create a Supabase project and apply `supabase/migrations/202607150001_profiles_auth.sql` in the Supabase SQL Editor.
+2. In **Authentication → URL Configuration**, set the production site URL to `https://anoni-app.vercel.app`; add `http://localhost:5173` and the production URL to the redirect allow list.
+3. Enable email/password authentication. If email confirmation is enabled, users must confirm the registration email before logging in.
+4. For local development, copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is intended for browser use; never put a Supabase secret/service-role key in a `VITE_` variable.
+5. Add the same two `VITE_SUPABASE_*` variables in the Vercel project’s environment settings for Preview and Production, then redeploy.
+6. To grant administrator access, set `app_metadata.role` to `admin` for the account using a trusted Supabase administrative tool. Do not use editable user metadata or a client-side flag for authorization. Admin database actions independently verify this role.
 
-## React Compiler
+The migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. Profile reads require an authenticated user.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Current data boundaries
 
-## Expanding the Oxlint configuration
+Account identity, age, public ID, XP, Coin balance, PRO/ban dates, and owned shop status are cloud-backed. The leaderboard and profile updates refresh through Supabase Realtime. Daily login, daily test-creation XP, challenge rewards, shop purchases, and admin updates are handled by database functions rather than direct browser updates.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Test content and attempts, avatar images, challenge voting totals, and other presentation-only progress are still browser-local. Test completion/author rewards are not issued as cloud balance changes until tests and attempts are migrated to the database. Paid Coin/PRO checkout is not connected to a payment provider and therefore does not grant purchased currency or subscriptions.
+
+## Run and validate
+
+```sh
+npm install
+npm run dev
+npm run lint
+npm run build
+```

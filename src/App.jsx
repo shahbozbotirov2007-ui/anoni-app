@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from './lib/supabase';
 
 import { 
 
@@ -121,133 +122,9 @@ const LEVEL_THRESHOLDS = [
 
 ];
 
-const getCurrentWeekKey = (date = new Date()) => {
-  const monday = new Date(date);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  const month = String(monday.getMonth() + 1).padStart(2, '0');
-  const day = String(monday.getDate()).padStart(2, '0');
-  return `${monday.getFullYear()}-${month}-${day}`;
-};
+const getUTCDateKey = (date = new Date()) => date.toISOString().slice(0, 10);
 
-const getLocalDateKey = (date = new Date()) => {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-};
-
-const PUBLIC_ID_STORAGE_KEY = 'anoni-public-ids';
 const ADMIN_PUBLIC_ID = '777-777';
-
-const loadReservedPublicIds = () => {
-  let storedIds;
-  try {
-    storedIds = JSON.parse(localStorage.getItem(PUBLIC_ID_STORAGE_KEY) || '[]');
-  } catch (error) {
-    console.error('Could not load public ID registry:', error);
-    return [];
-  }
-  if (!Array.isArray(storedIds)) {
-    console.error('Saved public ID registry is not an array.');
-    return [];
-  }
-  if (storedIds.some(id => typeof id !== 'string')) {
-    throw new Error('Saved public ID registry is invalid.');
-  }
-  return storedIds.filter(id => typeof id === 'string' && /^\d{3}-\d{3}$/.test(id));
-};
-
-const reservePublicId = publicId => {
-  const reservedIds = loadReservedPublicIds();
-  if (!reservedIds.includes(publicId)) {
-    localStorage.setItem(PUBLIC_ID_STORAGE_KEY, JSON.stringify([...reservedIds, publicId]));
-  }
-};
-
-const generateUniquePublicId = () => {
-  const usedIds = new Set([...loadReservedPublicIds(), ADMIN_PUBLIC_ID]);
-  for (let attempt = 0; attempt < 1000; attempt += 1) {
-    const digits = Math.floor(100000 + Math.random() * 900000).toString();
-    const publicId = `${digits.slice(0, 3)}-${digits.slice(3)}`;
-    if (!usedIds.has(publicId)) return publicId;
-  }
-  throw new Error('Could not generate a unique public ID.');
-};
-
-const loadRegisteredProfile = () => {
-  try {
-    const savedProfile = JSON.parse(localStorage.getItem('anoni-user-profile') || 'null');
-    if (
-      savedProfile
-      && typeof savedProfile.id === 'string'
-      && typeof savedProfile.name === 'string'
-      && savedProfile.name.trim()
-      && Number.isInteger(savedProfile.age)
-      && savedProfile.age >= 1
-      && savedProfile.age <= 120
-    ) {
-      if (typeof savedProfile.publicId !== 'string' || !/^\d{3}-\d{3}$/.test(savedProfile.publicId)) {
-        savedProfile.publicId = generateUniquePublicId();
-        localStorage.setItem('anoni-user-profile', JSON.stringify(savedProfile));
-      }
-      try {
-        reservePublicId(savedProfile.publicId);
-      } catch (error) {
-        console.error('Could not reserve the saved public ID:', error);
-      }
-      return savedProfile;
-    }
-  } catch (error) {
-    console.error('Could not load the saved user profile:', error);
-  }
-
-  return null;
-};
-
-const loadSavedUserState = profile => {
-  if (!profile) return [];
-  const defaults = {
-    id: profile.id,
-    publicId: profile.publicId,
-    name: profile.name,
-    age: profile.age,
-    username: '',
-    xp: 0,
-    coins: loadSavedCoins(profile.id),
-    isPro: Boolean(profile.isPro),
-    proMonths: Number(profile.proMonths) || 0,
-    subscriptionUntil: profile.subscriptionUntil ?? null,
-    bannedUntil: profile.bannedUntil ?? null,
-    ban: profile.ban ?? null,
-    avatar: null,
-    ownedItems: [],
-    equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
-    aiFreeUsedThisWeek: false,
-    testsCreatedToday: 0
-  };
-  try {
-    const savedUser = JSON.parse(localStorage.getItem(`anoni-user-state-${profile.id}`) || 'null');
-    if (savedUser && savedUser.id === profile.id) {
-      return [{
-        ...defaults,
-        ...savedUser,
-        name: profile.name,
-        age: profile.age,
-        avatar: loadSavedAvatar(),
-        publicId: profile.publicId,
-        subscriptionUntil: profile.subscriptionUntil ?? savedUser.subscriptionUntil ?? null,
-        bannedUntil: profile.bannedUntil ?? savedUser.bannedUntil ?? null,
-        ban: profile.ban ?? savedUser.ban ?? null,
-        isPro: profile.isPro ?? savedUser.isPro ?? false,
-        proMonths: profile.proMonths ?? savedUser.proMonths ?? 0
-      }];
-    }
-  } catch (error) {
-    console.error('Could not load the saved user state:', error);
-  }
-  defaults.avatar = loadSavedAvatar();
-  return [defaults];
-};
 
 const loadSavedAvatar = () => {
   try {
@@ -259,24 +136,42 @@ const loadSavedAvatar = () => {
   }
 };
 
-const getDailyLoginStorageKey = userId => `anoni-daily-login-${userId}`;
-const getUserCoinsStorageKey = userId => `anoni-user-coins-${userId}`;
+const mapProfileRow = row => ({
+  id: row.user_id,
+  publicId: row.public_id,
+  name: row.display_name,
+  age: row.age,
+  xp: row.xp,
+  coins: row.coins,
+  subscriptionUntil: row.subscription_until ? Date.parse(row.subscription_until) : null,
+  bannedUntil: row.banned_until ? Date.parse(row.banned_until) : null,
+  isPro: Boolean(row.subscription_until && Date.parse(row.subscription_until) > Date.now()),
+  ownedItems: row.owned_items || [],
+  testsCreatedToday: row.tests_created_date === getUTCDateKey() ? row.tests_created_count : 0,
+  testsCreatedDate: row.tests_created_date,
+  equipped: {
+    nameColor: 'text-white',
+    font: 'font-sans',
+    frame: 'border-violet-400',
+    anim: '',
+    status: row.equipped_status || null
+  },
+  avatar: null,
+  username: '',
+  proMonths: 0,
+  ban: row.banned_until && Date.parse(row.banned_until) > Date.now()
+    ? { duration: 'vaqtinchalik', bannedUntil: Date.parse(row.banned_until) }
+    : null
+});
 
-const loadSavedCoins = userId => {
-  try {
-    const coins = Number(localStorage.getItem(getUserCoinsStorageKey(userId)));
-    return Number.isInteger(coins) && coins >= 0 ? coins : 0;
-  } catch (error) {
-    console.error('Could not load the saved coin balance:', error);
-    return 0;
-  }
-};
-
-const getDateDifferenceInDays = (fromDate, toDate) => {
-  const from = new Date(`${fromDate}T00:00:00Z`);
-  const to = new Date(`${toDate}T00:00:00Z`);
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
-  return Math.round((to.getTime() - from.getTime()) / 86400000);
+const fetchProfiles = async () => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .order('xp', { ascending: false })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data.map(mapProfileRow);
 };
 
 const ADMIN_PROFILE = {
@@ -367,23 +262,26 @@ const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 
 
 export default function App() {
-  const [registeredProfile, setRegisteredProfile] = useState(loadRegisteredProfile);
+  const [registeredProfile, setRegisteredProfile] = useState(null);
+  const [authUser, setAuthUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState('register');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [avatarDataUrl, setAvatarDataUrl] = useState(loadSavedAvatar);
   const [isAvatarDragOver, setIsAvatarDragOver] = useState(false);
   const [registrationName, setRegistrationName] = useState('');
   const [registrationAge, setRegistrationAge] = useState('');
   const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
   const [registrationError, setRegistrationError] = useState('');
-  const [currentUserId, setCurrentUserId] = useState(() => registeredProfile?.id || 'AN-1001');
+  const [currentUserId, setCurrentUserId] = useState(null);
   const currentUserInitials = (registeredProfile?.name || '')
     .split(/\s+/)
     .slice(0, 2)
     .map(namePart => namePart[0])
     .join('')
     .toUpperCase();
-  const weeklyRewardStorageKey = `anoni-weekly-test-rewards-${currentUserId}`;
-  const dailyTestCreationStorageKey = `anoni-daily-test-creations-${currentUserId}`;
-  const achievementStorageKey = `anoni-achievements-${currentUserId}`;
 
   // --- Global Navigation & Mode ---
 
@@ -398,31 +296,11 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
   const [accountActionModal, setAccountActionModal] = useState(null);
-  const [achievementNotifications, setAchievementNotifications] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(achievementStorageKey) || '[]');
-      return Array.isArray(stored) ? stored : [];
-    } catch (error) {
-      console.error('Could not load achievement notifications:', error);
-      return [];
-    }
-  });
-
   const [dailyTestCreationProgress, setDailyTestCreationProgress] = useState(() => {
-    const today = getLocalDateKey();
-    try {
-      const stored = JSON.parse(localStorage.getItem(dailyTestCreationStorageKey) || 'null');
-      if (stored?.date === today && Number.isInteger(stored.count) && stored.count >= 0) {
-        return stored;
-      }
-    } catch (error) {
-      console.error('Could not load daily test creation progress:', error);
-    }
-
-    return { date: today, count: 0 };
+    return { date: getUTCDateKey(), count: 0 };
   });
 
-  const dailyTestCreationCount = dailyTestCreationProgress.date === getLocalDateKey()
+  const dailyTestCreationCount = dailyTestCreationProgress.date === getUTCDateKey()
     ? dailyTestCreationProgress.count
     : 0;
   const reachedDailyTestCreationLimit = dailyTestCreationCount >= 2;
@@ -450,44 +328,36 @@ export default function App() {
     }
   };
 
-  const applyAccountAction = (userId, action, duration) => {
+  const applyAccountAction = async (userId, action, duration) => {
     const targetUser = users.find(user => user.id === userId);
     if (!targetUser) {
       showToast("Foydalanuvchi topilmadi. Sahifani yangilang.", 'error');
       return;
     }
 
-    const now = Date.now();
-    let nextUser;
-    let auditMessage;
-    if (action === 'subscription') {
-      const subscriptionStart = Math.max(Number(targetUser.subscriptionUntil) || now, now);
-      const subscriptionUntil = addCalendarDuration(subscriptionStart, duration);
-      nextUser = {
-        ...targetUser,
-        isPro: true,
-        proMonths: Math.max(targetUser.proMonths || 0, duration.months),
-        subscriptionUntil
-      };
-      auditMessage = `${targetUser.name} ga PRO obuna ${duration.label} muddatga berildi`;
-    } else if (action === 'ban') {
-      const bannedUntil = addCalendarDuration(now, duration);
-      nextUser = {
-        ...targetUser,
-        bannedUntil,
-        ban: {
-          reason: "Qoidabuzarlik va g'irromlik",
-          duration: duration.label,
-          bannedUntil
-        }
-      };
-      auditMessage = `${targetUser.name} ${duration.label} muddatga BAN qilindi`;
-    } else {
-      nextUser = { ...targetUser, ban: null, bannedUntil: null };
-      auditMessage = `${targetUser.name} BANdan ochildi`;
+    const actionUntil = action === 'unban'
+      ? null
+      : action === 'subscription'
+        ? new Date(addCalendarDuration(Math.max(Number(targetUser.subscriptionUntil) || Date.now(), Date.now()), duration)).toISOString()
+        : new Date(addCalendarDuration(Date.now(), duration)).toISOString();
+    const { error } = await supabase.rpc('admin_set_account_status', {
+      p_user_id: userId,
+      p_action: action,
+      p_until: actionUntil
+    });
+    if (error) {
+      console.error('Could not update account status:', error);
+      showToast(error.message.includes('Admin role required')
+        ? "Bu amal uchun Supabase admin roli talab qilinadi."
+        : "Hisob holatini yangilab bo'lmadi.", 'error');
+      return;
     }
 
-    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? nextUser : user));
+    const auditMessage = action === 'subscription'
+      ? `${targetUser.name} ga PRO obuna ${duration.label} muddatga berildi`
+      : action === 'ban'
+        ? `${targetUser.name} ${duration.label} muddatga BAN qilindi`
+        : `${targetUser.name} BANdan ochildi`;
     setAuditLogs(previousLogs => [{
       id: `L-${Date.now()}`,
       admin: 'Admin',
@@ -533,15 +403,133 @@ export default function App() {
 
   // --- Users State ---
 
-  const [users, setUsers] = useState(() => loadSavedUserState(registeredProfile));
+  const [users, setUsers] = useState([]);
 
+  useEffect(() => {
+    let active = true;
+    let requestVersion = 0;
 
+    const syncSession = async session => {
+      const version = ++requestVersion;
+      if (!session?.user) {
+        setAuthUser(null);
+        setRegisteredProfile(null);
+        setCurrentUserId(null);
+        setUsers([]);
+        setIsAdminMode(false);
+        setAuthLoading(false);
+        return;
+      }
+
+      setAuthUser(session.user);
+      setCurrentUserId(session.user.id);
+      const isAdmin = session.user.app_metadata?.role === 'admin';
+      setIsAdminMode(isAdmin);
+
+      try {
+        const profiles = await fetchProfiles();
+        if (!active || version !== requestVersion) return;
+        const profile = profiles.find(user => user.id === session.user.id);
+        if (!profile) throw new Error('Authenticated account has no profile row.');
+        setUsers(profiles);
+        setRegisteredProfile(profile);
+        setDailyTestCreationProgress({
+          date: profile.testsCreatedDate || getUTCDateKey(),
+          count: profile.testsCreatedToday || 0
+        });
+        setAuthLoading(false);
+      } catch (error) {
+        console.error('Could not load Supabase profiles:', error);
+        if (!active || version !== requestVersion) return;
+        setRegistrationError("Profil ma'lumotlarini yuklab bo'lmadi. Supabase migratsiyasi va RLS sozlamalarini tekshiring.");
+        setAuthLoading(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      queueMicrotask(() => { void syncSession(session); });
+    });
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        console.error('Could not restore the Supabase session:', error);
+        setRegistrationError("Hisob sessiyasini tiklab bo'lmadi. Qayta kiring.");
+        setAuthLoading(false);
+        return;
+      }
+      void syncSession(data.session);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const realtimeUserId = authUser?.id;
+  useEffect(() => {
+    if (!realtimeUserId) return undefined;
+
+    const refreshProfiles = async () => {
+      try {
+        const profiles = await fetchProfiles();
+        setUsers(profiles);
+        const ownProfile = profiles.find(user => user.id === realtimeUserId);
+        if (ownProfile) {
+          setRegisteredProfile(ownProfile);
+          setDailyTestCreationProgress({
+            date: ownProfile.testsCreatedDate || getUTCDateKey(),
+            count: ownProfile.testsCreatedToday || 0
+          });
+        }
+      } catch (error) {
+        console.error('Could not refresh Supabase profiles:', error);
+        showToast("Reyting va profillarni yangilab bo'lmadi.", 'error');
+      }
+    };
+
+    const channel = supabase
+      .channel(`profiles:${realtimeUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        void refreshProfiles();
+      })
+      .subscribe(status => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          showToast("Reytingning real vaqt ulanishi uzildi.", 'error');
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [realtimeUserId]);
+
+  const activeProfileId = registeredProfile?.id;
+  useEffect(() => {
+    if (!activeProfileId) return undefined;
+    let active = true;
+
+    supabase.rpc('claim_daily_login_reward').then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        console.error('Could not claim daily login reward:', error);
+        showToast("Kundalik bonusni olish muvaffaqiyatsiz tugadi.", 'error');
+        return;
+      }
+      if (data.coins_awarded > 0) {
+        setDailyRewardModal({ coins: data.coins_awarded, streakDay: data.streak_day });
+      }
+    });
+
+    return () => { active = false; };
+  }, [activeProfileId]);
 
   const storedCurrentUser = users.find(u => u.id === currentUserId) || {
     id: currentUserId,
     name: registeredProfile?.name || 'Foydalanuvchi',
     xp: 0,
-    coins: loadSavedCoins(currentUserId),
+    coins: 0,
     isPro: false,
     proMonths: 0,
     subscriptionUntil: registeredProfile?.subscriptionUntil ?? null,
@@ -581,138 +569,6 @@ export default function App() {
 
   const userLevel = getUserLevelInfo(currentUser.xp, currentUser.proMonths);
 
-  useEffect(() => {
-    if (!registeredProfile || users.length === 0) return;
-    const userState = users.find(user => user.id === currentUserId);
-    if (!userState) return;
-
-    try {
-      localStorage.setItem(`anoni-user-state-${currentUserId}`, JSON.stringify(userState));
-      const savedProfile = JSON.parse(localStorage.getItem('anoni-user-profile') || 'null');
-      if (savedProfile?.id === currentUserId) {
-        const nextProfile = {
-          ...savedProfile,
-          subscriptionUntil: userState.subscriptionUntil ?? null,
-          bannedUntil: userState.bannedUntil ?? null,
-          ban: userState.ban ?? null,
-          isPro: userState.isPro ?? false,
-          proMonths: userState.proMonths ?? 0
-        };
-        localStorage.setItem('anoni-user-profile', JSON.stringify(nextProfile));
-        const profileFieldsChanged = [
-          'subscriptionUntil',
-          'bannedUntil',
-          'ban',
-          'isPro',
-          'proMonths'
-        ].some(field => JSON.stringify(registeredProfile[field] ?? null) !== JSON.stringify(nextProfile[field] ?? null));
-        if (profileFieldsChanged) {
-          setRegisteredProfile(previous => previous?.id === currentUserId ? nextProfile : previous);
-        }
-      }
-    } catch (error) {
-      console.error('Could not persist the user account state:', error);
-      showToast("Foydalanuvchi ma'lumotlarini saqlab bo'lmadi.", 'error');
-    }
-  }, [users, currentUserId, registeredProfile]);
-
-  useEffect(() => {
-    if (!registeredProfile) return;
-    try {
-      localStorage.setItem(getUserCoinsStorageKey(currentUserId), String(currentUser.coins));
-    } catch (error) {
-      console.error('Could not save the coin balance:', error);
-      showToast("Coin balansini brauzerda saqlab bo'lmadi.", 'error');
-    }
-  }, [currentUserId, currentUser.coins, registeredProfile]);
-
-  useEffect(() => {
-    if (!registeredProfile) return;
-
-    const today = getLocalDateKey();
-    const dailyLoginKey = getDailyLoginStorageKey(currentUserId);
-    const coinsKey = getUserCoinsStorageKey(currentUserId);
-    let previousLoginValue;
-    let previousCoinsValue;
-    let previousLogin = null;
-
-    try {
-      previousLoginValue = localStorage.getItem(dailyLoginKey);
-      previousCoinsValue = localStorage.getItem(coinsKey);
-      previousLogin = previousLoginValue ? JSON.parse(previousLoginValue) : null;
-    } catch (error) {
-      console.error('Could not load daily login reward progress:', error);
-      showToast("Kundalik bonus ma'lumotlarini o'qib bo'lmadi.", 'error');
-      return;
-    }
-
-    const daysSinceLastLogin = previousLogin
-      && typeof previousLogin.lastLoginDate === 'string'
-      ? getDateDifferenceInDays(previousLogin.lastLoginDate, today)
-      : null;
-
-    if (daysSinceLastLogin === 0) return;
-
-    const previousStreak = Number.isInteger(previousLogin?.streakDay)
-      ? previousLogin.streakDay
-      : 0;
-    const streakDay = daysSinceLastLogin === 1 && previousStreak < 16
-      ? previousStreak + 1
-      : 1;
-    const rewardCoins = Math.min(streakDay + 4, 10);
-    const currentCoins = loadSavedCoins(currentUserId);
-    const nextCoins = currentCoins + rewardCoins;
-
-    try {
-      localStorage.setItem(coinsKey, String(nextCoins));
-      localStorage.setItem(dailyLoginKey, JSON.stringify({
-        lastLoginDate: today,
-        streakDay
-      }));
-    } catch (error) {
-      try {
-        if (previousCoinsValue === null) localStorage.removeItem(coinsKey);
-        else localStorage.setItem(coinsKey, previousCoinsValue);
-        if (previousLoginValue === null) localStorage.removeItem(dailyLoginKey);
-        else localStorage.setItem(dailyLoginKey, previousLoginValue);
-      } catch (rollbackError) {
-        console.error('Could not restore daily login reward storage:', rollbackError);
-      }
-      console.error('Could not save daily login reward:', error);
-      showToast("Kundalik bonusni saqlab bo'lmadi. Brauzer xotirasini tekshiring.", 'error');
-      return;
-    }
-
-    setUsers(previousUsers => {
-      const userExists = previousUsers.some(user => user.id === currentUserId);
-      if (!userExists) {
-        return [{
-          id: currentUserId,
-          name: registeredProfile.name,
-          age: registeredProfile.age,
-          username: '',
-          xp: 0,
-          coins: nextCoins,
-          isPro: false,
-          proMonths: 0,
-          subscriptionUntil: registeredProfile.subscriptionUntil ?? null,
-          bannedUntil: registeredProfile.bannedUntil ?? null,
-          ban: registeredProfile.ban ?? null,
-          avatar: avatarDataUrl,
-          ownedItems: [],
-          equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
-          aiFreeUsedThisWeek: false,
-          testsCreatedToday: 0
-        }, ...previousUsers];
-      }
-      return previousUsers.map(user => (
-        user.id === currentUserId ? { ...user, coins: nextCoins } : user
-      ));
-    });
-    setDailyRewardModal({ coins: rewardCoins, streakDay });
-  }, [currentUserId, registeredProfile, avatarDataUrl]);
-
-
 
   // --- Transactions & Audit Logs ---
 
@@ -727,44 +583,88 @@ export default function App() {
 
 
 
-  const updateUserBalance = (userId, xpDelta, coinDelta, reason, isAdminAction = false) => {
+  const updateUserBalance = async (userId, xpDelta, coinDelta, reason, isAdminAction = false, activityReference = '') => {
+    let error;
+    if (isAdminAction) {
+      ({ error } = await supabase.rpc('admin_adjust_balance', {
+        p_user_id: userId,
+        p_xp_delta: xpDelta,
+        p_coin_delta: coinDelta
+      }));
+    } else if (userId !== currentUserId) {
+      error = new Error('Client cannot adjust another user profile.');
+    } else if (reason.startsWith('Yangi test yaratildi')) {
+      const result = await supabase.rpc('claim_test_creation_reward');
+      error = result.error;
+      if (!error) {
+        setDailyTestCreationProgress(previous => ({
+          date: getUTCDateKey(),
+          count: (previous.date === getUTCDateKey() ? previous.count : 0) + 1
+        }));
+      }
+    } else if (reason === 'Kunlik Challenge bajarildi') {
+      const result = await supabase.rpc('claim_challenge_reward', { p_challenge_id: activityReference });
+      error = result.error;
+    } else {
+      error = new Error('This balance change is not backed by a permitted server action.');
+    }
 
-    setUsers(prev => prev.map(u => {
-
-      if (u.id !== userId) return u;
-
-      return {
-
-        ...u,
-
-        xp: Math.max(0, u.xp + xpDelta),
-
-        coins: Math.max(0, u.coins + coinDelta)
-
-      };
-
-    }));
-
-
+    if (error) {
+      console.error('Could not apply cloud balance change:', error);
+      showToast(error.message.includes('Admin role required')
+        ? "Bu amal uchun Supabase admin roli talab qilinadi."
+        : error.message.includes('limit')
+          ? "Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!"
+          : "Balansni yangilab bo'lmadi. Amal serverda rad etildi.", 'error');
+      return false;
+    }
 
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
     const newTx = [];
-
     if (xpDelta !== 0) {
-
       newTx.push({ id: `TX-${Date.now()}-X`, userId, type: 'XP', amount: xpDelta, reason: isAdminAction ? `[Admin] ${reason}` : reason, date: `Bugun, ${now}` });
-
     }
-
     if (coinDelta !== 0) {
-
       newTx.push({ id: `TX-${Date.now()}-C`, userId, type: 'COIN', amount: coinDelta, reason: isAdminAction ? `[Admin] ${reason}` : reason, date: `Bugun, ${now}` });
+    }
+    setTransactions(previous => [...newTx, ...previous]);
+    return true;
+  };
 
+  const purchaseShopItem = async item => {
+    const { error } = await supabase.rpc('purchase_profile_item', { p_item_id: item.id });
+    if (error) {
+      console.error('Could not purchase profile item:', error);
+      showToast(error.message.includes('Insufficient coins')
+        ? 'Coin yetarli emas.'
+        : error.message.includes('already owned')
+          ? 'Bu mahsulot sizda bor.'
+          : "Mahsulotni xarid qilib bo'lmadi.", 'error');
+      return;
     }
 
-    setTransactions(prev => [...newTx, ...prev]);
+    setUsers(previousUsers => previousUsers.map(user => user.id === currentUserId
+      ? {
+        ...user,
+        coins: user.coins - item.price,
+        ownedItems: [...user.ownedItems, item.id],
+        equipped: { ...user.equipped, status: item.id }
+      }
+      : user));
+    showToast(`${item.name} xarid qilindi va o'rnatildi!`);
+  };
 
+  const equipShopItem = async item => {
+    const { error } = await supabase.rpc('equip_profile_item', { p_item_id: item.id });
+    if (error) {
+      console.error('Could not equip profile item:', error);
+      showToast("Mahsulotni profilga o'rnatib bo'lmadi.", 'error');
+      return;
+    }
+    setUsers(previousUsers => previousUsers.map(user => user.id === currentUserId
+      ? { ...user, equipped: { ...user.equipped, status: item.id } }
+      : user));
+    showToast(`${item.name} profilga o'rnatildi!`);
   };
 
 
@@ -808,33 +708,6 @@ export default function App() {
   const [testStartedAt, setTestStartedAt] = useState(null);
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  const currentWeekKey = getCurrentWeekKey();
-
-  const [weeklyTestProgress, setWeeklyTestProgress] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(weeklyRewardStorageKey) || 'null');
-      if (stored?.weekKey === currentWeekKey && Number.isInteger(stored.completions) && stored.completions >= 0) {
-        return stored;
-      }
-    } catch (error) {
-      console.error('Could not load weekly test reward progress:', error);
-    }
-
-    return { weekKey: currentWeekKey, completions: 0 };
-  });
-
-  const weeklyTestCompletions = weeklyTestProgress.weekKey === currentWeekKey
-    ? weeklyTestProgress.completions
-    : 0;
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(weeklyRewardStorageKey, JSON.stringify(weeklyTestProgress));
-    } catch (error) {
-      console.error('Could not save weekly test reward progress:', error);
-    }
-  }, [weeklyRewardStorageKey, weeklyTestProgress]);
 
   useEffect(() => {
     if (subView !== 'solve_test' || !activeTestToSolve || testResult || !testStartedAt) return;
@@ -921,13 +794,6 @@ export default function App() {
 
   const [paymentModal, setPaymentModal] = useState(null); // { title, amountUSD, type: 'PRO' | 'COINS', coinsAmount }
 
-  const [cardNumber, setCardNumber] = useState('8600 ');
-
-  const [cardExpiry, setCardExpiry] = useState('');
-
-  const [smsCode, setSmsCode] = useState('');
-
-  const [paymentStep, setPaymentStep] = useState(1);
   const [coinPurchaseCoins, setCoinPurchaseCoins] = useState(null);
   const coinPurchaseMessage = coinPurchaseCoins
     ? `Salom! Men ANONI tizimidan ${currentUser.name} bo'laman. Menga ${coinPurchaseCoins} Coin kerak. To'lov qilish uchun yordam bering.`
@@ -1225,25 +1091,8 @@ export default function App() {
 
 
 
-  const handlePublishTest = () => {
-    const today = getLocalDateKey();
-    let createdToday = dailyTestCreationProgress.date === today
-      ? dailyTestCreationProgress.count
-      : 0;
-    if (dailyTestCreationStorageKey) {
-      try {
-        const stored = JSON.parse(localStorage.getItem(dailyTestCreationStorageKey) || 'null');
-        if (stored?.date === today && Number.isInteger(stored.count) && stored.count >= 0) {
-          createdToday = Math.max(createdToday, stored.count);
-        }
-      } catch (error) {
-        console.error('Could not verify daily test creation progress:', error);
-        showToast("Kunlik limitni tekshirib bo'lmadi. Test yaratish bekor qilindi.", "error");
-        return;
-      }
-    }
-
-    if (createdToday >= 2) {
+  const handlePublishTest = async () => {
+    if (dailyTestCreationCount >= 2) {
       showToast("Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!", "error");
       return;
     }
@@ -1297,20 +1146,9 @@ export default function App() {
       popularRewardGranted: false
     };
 
-    const nextDailyProgress = { date: today, count: createdToday + 1 };
-    if (dailyTestCreationStorageKey) {
-      try {
-        localStorage.setItem(dailyTestCreationStorageKey, JSON.stringify(nextDailyProgress));
-      } catch (error) {
-        console.error('Could not save daily test creation progress:', error);
-        showToast("Kunlik limitni saqlab bo'lmadi. Test yaratish bekor qilindi.", "error");
-        return;
-      }
-    }
-
-    setDailyTestCreationProgress(nextDailyProgress);
+    const rewarded = await updateUserBalance(currentUser.id, 50, 0, `Yangi test yaratildi (${newTest.id})`);
+    if (!rewarded) return;
     setTests(prev => [newTest, ...prev]);
-    updateUserBalance(currentUser.id, 50, 0, `Yangi test yaratildi (${newTest.id})`);
     showToast("+50 XP: Yangi test muvaffaqiyatli yaratildi!");
 
 
@@ -1396,22 +1234,6 @@ export default function App() {
         ? Math.floor((Date.now() - testStartedAt) / 1000)
         : 0;
       const isSpam = elapsedTestSeconds < 10;
-      const participantCount = activeTestToSolve.attempts.filter(
-        attempt => !attempt.isSpam && attempt.userId !== activeTestToSolve.creatorId
-      ).length + (currentUser.id !== activeTestToSolve.creatorId ? 1 : 0);
-      const authorParticipantCount = activeTestToSolve.attempts.filter(
-        attempt => !attempt.isSpam && attempt.userId !== activeTestToSolve.creatorId
-      ).length + (!isSpam && currentUser.id !== activeTestToSolve.creatorId ? 1 : 0);
-      const grantsPopularAchievement = !isSpam
-        && currentUser.id !== activeTestToSolve.creatorId
-        && authorParticipantCount === 50
-        && !activeTestToSolve.popularRewardGranted;
-      const rewardXp = weeklyTestCompletions < 3
-        ? (participantCount <= 100 ? 100 : 30)
-        : 0;
-      const rewardCoins = weeklyTestCompletions < 3
-        ? (participantCount <= 100 ? 100 : 30)
-        : 30;
       const attemptObj = {
 
         userId: currentUser.id,
@@ -1426,8 +1248,8 @@ export default function App() {
         date: 'Hozirgina',
         elapsedSeconds: elapsedTestSeconds,
         isSpam,
-        rewardXp: isSpam ? 0 : rewardXp,
-        rewardCoins: isSpam ? 0 : rewardCoins
+        rewardXp: 0,
+        rewardCoins: 0
 
       };
 
@@ -1436,77 +1258,18 @@ export default function App() {
         ? {
           ...t,
           attempts: [...t.attempts, attemptObj],
-          popularRewardGranted: t.popularRewardGranted || grantsPopularAchievement
+          popularRewardGranted: t.popularRewardGranted
         }
         : t));
 
-      updateUserBalance(
-        currentUser.id,
-        isSpam ? -30 : rewardXp,
-        isSpam ? -30 : rewardCoins,
-        isSpam
-          ? 'Juda tez test yechish jarimasi'
-          : `Test yechish mukofoti (${activeTestToSolve.id})`
-      );
-
-      if (!isSpam) {
-        setWeeklyTestProgress(prev => ({
-          weekKey: currentWeekKey,
-          completions: (prev.weekKey === currentWeekKey ? prev.completions : 0) + 1
-        }));
-      }
-
       if (!isSpam && currentUser.id !== activeTestToSolve.creatorId) {
-        const creatorReward = authorParticipantCount === 1 ? 10 : 5;
-        updateUserBalance(
-          activeTestToSolve.creatorId,
-          creatorReward,
-          creatorReward,
-          `Test ishtirokchisi uchun muallif mukofoti (${activeTestToSolve.id})`
-        );
-      }
-
-      if (grantsPopularAchievement) {
-        updateUserBalance(
-          activeTestToSolve.creatorId,
-          0,
-          300,
-          `Ommabop test yutug'i (${activeTestToSolve.id})`
-        );
-
-        if (activeTestToSolve.creatorId === currentUser.id) {
-          const notification = {
-            id: `popular-${activeTestToSolve.id}`,
-            title: 'Ommabop test',
-            message: `"${activeTestToSolve.title}" testi 50 nafar qatnashchiga yetdi. +300 Coin mukofot olindi!`,
-            createdAt: Date.now()
-          };
-          setAchievementNotifications(prev => prev.some(item => item.id === `popular-${activeTestToSolve.id}`)
-            ? prev
-            : [notification, ...prev]);
-          let notificationSaved = true;
-          if (achievementStorageKey) {
-            try {
-              const nextNotifications = [
-                notification,
-                ...achievementNotifications.filter(item => item.id !== notification.id)
-              ];
-              localStorage.setItem(achievementStorageKey, JSON.stringify(nextNotifications));
-            } catch (error) {
-              notificationSaved = false;
-              console.error('Could not save achievement notification:', error);
-              showToast("Yutuq bildirishnomasini saqlab bo'lmadi.", 'error');
-            }
-          }
-          if (notificationSaved) showToast('🎉 Ommabop test yutug‘i! +300 Coin mukofot berildi!');
-        }
+        showToast("Test urinishlari hozircha faqat ushbu brauzerda saqlanadi; muallif mukofoti cloud testlar yoqilgach beriladi.", 'error');
       }
 
       setTestResult(attemptObj);
-
-      if (!grantsPopularAchievement) {
-        showToast(isSpam ? 'Tez yechish aniqlandi: jarima qo‘llandi.' : 'Natijangiz hisoblandi!');
-      }
+      showToast(isSpam
+        ? 'Test juda tez yechildi. Natija qayd etildi, ammo mukofot berilmadi.'
+        : 'Natijangiz qayd etildi. Cloud mukofotlari testlar bazaga ko‘chirilgach faollashadi.');
 
     }
 
@@ -1568,145 +1331,60 @@ export default function App() {
 
   // --- Handlers: Click Payment Process ---
 
-  const handleConfirmClickPayment = () => {
-
-    if (paymentStep === 1) {
-
-      if (cardNumber.replace(/\s/g, '').length < 16) {
-
-        showToast("16 xonali karta raqamini to'liq kiriting!", "error");
-
-        return;
-
-      }
-
-      setPaymentStep(2);
-
-      return;
-
-    }
-
-
-
-    if (smsCode.length < 4) {
-
-      showToast("SMS kodni kiriting (masalan: 1234)", "error");
-
-      return;
-
-    }
-
-
-
-    if (paymentModal.type === 'PRO') {
-
-      setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, isPro: true, proMonths: u.proMonths + 1 } : u));
-
-      showToast("Tabriklaymiz! ANONI PRO obunasi 1 oyga faollashtirildi! ✨");
-
-    } else if (paymentModal.type === 'COINS') {
-
-      updateUserBalance(currentUser.id, 0, paymentModal.coinsAmount, `Click & Payme orqali ${paymentModal.coinsAmount} Coin xarid qilindi`);
-
-      showToast(`Balansingizga +${paymentModal.coinsAmount} ANONI COIN qo'shildi! 🪙`);
-
-    }
-
-
-
-    setPaymentModal(null);
-
-    setPaymentStep(1);
-
-    setSmsCode('');
-
-  };
-
-  const handleRegistrationSubmit = (event) => {
+  const handleRegistrationSubmit = async event => {
     event.preventDefault();
 
-    if (!registrationTermsAccepted) {
+    if (authBusy) return;
+    if (authMode === 'register' && !registrationTermsAccepted) {
       setRegistrationError("Davom etish uchun foydalanish shartlariga rozilik bildiring.");
+      return;
+    }
+
+    const email = authEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setRegistrationError("Yaroqli email manzilini kiriting.");
+      return;
+    }
+    if (authPassword.length < 8) {
+      setRegistrationError("Parol kamida 8 belgidan iborat bo'lishi kerak.");
       return;
     }
 
     const name = registrationName.trim();
     const age = Number(registrationAge);
-    if (!name) {
+    if (authMode === 'register' && !name) {
       setRegistrationError("Ismingizni kiriting.");
       return;
     }
-    if (!Number.isInteger(age) || age < 1 || age > 120) {
+    if (authMode === 'register' && (!Number.isInteger(age) || age < 1 || age > 120)) {
       setRegistrationError("Yosh 1 dan 120 gacha bo'lgan butun son bo'lishi kerak.");
       return;
     }
 
-    let profile;
+    setAuthBusy(true);
+    setRegistrationError('');
     try {
-      profile = {
-        id: `AN-${globalThis.crypto?.randomUUID?.() || Date.now()}`,
-        publicId: generateUniquePublicId(),
-        name,
-        age
-      };
-      reservePublicId(profile.publicId);
-    } catch (error) {
-      console.error('Could not generate or reserve a unique public ID:', error);
-      setRegistrationError("Takrorlanmaydigan ID yaratib bo'lmadi. Qayta urinib ko'ring.");
-      return;
-    }
-    const weeklyKey = `anoni-weekly-test-rewards-${profile.id}`;
-    const dailyKey = `anoni-daily-test-creations-${profile.id}`;
-    const achievementsKey = `anoni-achievements-${profile.id}`;
-    let weeklyProgress = { weekKey: currentWeekKey, completions: 0 };
-    let dailyProgress = { date: getLocalDateKey(), count: 0 };
-    let savedAchievements = [];
-
-    try {
-      const storedWeekly = JSON.parse(localStorage.getItem(weeklyKey) || 'null');
-      if (storedWeekly?.weekKey === currentWeekKey && Number.isInteger(storedWeekly.completions)) {
-        weeklyProgress = storedWeekly;
+      if (authMode === 'register') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: authPassword,
+          options: { data: { display_name: name, age } }
+        });
+        if (error) throw error;
+        if (!data.session) {
+          setRegistrationError("Hisob yaratildi. Email'ingizni tasdiqlang, so'ng tizimga kiring.");
+          setAuthMode('login');
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
+        if (error) throw error;
       }
-      const storedDaily = JSON.parse(localStorage.getItem(dailyKey) || 'null');
-      if (storedDaily?.date === dailyProgress.date && Number.isInteger(storedDaily.count)) {
-        dailyProgress = storedDaily;
-      }
-      const storedAchievements = JSON.parse(localStorage.getItem(achievementsKey) || '[]');
-      if (Array.isArray(storedAchievements)) savedAchievements = storedAchievements;
-      localStorage.setItem('anoni-user-profile', JSON.stringify(profile));
     } catch (error) {
-      console.error('Could not save or load local registration data:', error);
-      setRegistrationError("Ma'lumotni saqlab bo'lmadi. Brauzer xotirasi va ruxsatlarini tekshiring.");
-      return;
+      console.error('Supabase authentication failed:', error);
+      setRegistrationError(error.message || "Hisobga kirib bo'lmadi. Ma'lumotlarni tekshiring.");
+    } finally {
+      setAuthBusy(false);
     }
-
-    setCurrentUserId(profile.id);
-    setWeeklyTestProgress(weeklyProgress);
-    setDailyTestCreationProgress(dailyProgress);
-    setAchievementNotifications(savedAchievements);
-    setUsers(prev => [
-      {
-        id: profile.id,
-        publicId: profile.publicId,
-        name: profile.name,
-        age: profile.age,
-        username: '',
-        xp: 0,
-        coins: 0,
-        isPro: false,
-        proMonths: 0,
-        subscriptionUntil: null,
-        bannedUntil: null,
-        avatar: null,
-        ban: null,
-        ownedItems: [],
-        equipped: { nameColor: 'text-white', font: 'font-sans', frame: 'border-violet-400', anim: '' },
-        aiFreeUsedThisWeek: false,
-        testsCreatedToday: 0
-      },
-      ...prev
-    ]);
-    setRegisteredProfile(profile);
   };
 
   const saveAvatarFile = (file) => {
@@ -1749,6 +1427,17 @@ export default function App() {
   // BAN OVERLAY (Agar foydalanuvchi BAN olgan bo'lsa va Admin rejimida bo'lmasa)
   // ============================================================================
 
+  if (authLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#0B0912] text-white">
+        <div className="flex items-center gap-3 rounded-2xl border border-violet-300/15 bg-[#15111F] px-5 py-4 text-sm text-slate-200">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-300/25 border-t-violet-300" />
+          Supabase hisobingiz yuklanmoqda...
+        </div>
+      </main>
+    );
+  }
+
   if (!registeredProfile) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#0B0912] px-5 py-8 text-white">
@@ -1762,52 +1451,85 @@ export default function App() {
               A
             </div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-violet-300">ANONI</p>
-            <h1 className="mt-2 text-2xl font-extrabold">Xush kelibsiz!</h1>
+            <h1 className="mt-2 text-2xl font-extrabold">
+              {authMode === 'register' ? 'Hisob yarating' : 'Hisobingizga kiring'}
+            </h1>
             <p className="mt-2 text-sm leading-relaxed text-[#A7A0B5]">
-              Davom etish uchun ismingiz va yoshingizni kiriting. Ma'lumotlar faqat shu brauzerda saqlanadi.
+              Profilingiz, Coin va XP xavfsiz tarzda Supabase bulut bazasida saqlanadi va reyting barcha foydalanuvchilar uchun sinxronlanadi.
             </p>
 
-            <label htmlFor="registration-name" className="mt-6 block text-xs font-semibold text-slate-300">Ism</label>
+            <label htmlFor="registration-email" className="mt-6 block text-xs font-semibold text-slate-300">Email</label>
             <input
-              id="registration-name"
-              autoComplete="given-name"
-              maxLength={50}
-              value={registrationName}
-              onChange={event => setRegistrationName(event.target.value)}
-              placeholder="Ismingiz"
+              id="registration-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={authEmail}
+              onChange={event => setAuthEmail(event.target.value)}
+              placeholder="name@example.com"
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
             />
 
-            <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
+            <label htmlFor="registration-password" className="mt-4 block text-xs font-semibold text-slate-300">Parol</label>
             <input
-              id="registration-age"
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max="120"
-              step="1"
-              value={registrationAge}
-              onChange={event => setRegistrationAge(event.target.value)}
-              placeholder="Yoshingiz"
+              id="registration-password"
+              type="password"
+              autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+              minLength={8}
+              required
+              value={authPassword}
+              onChange={event => setAuthPassword(event.target.value)}
+              placeholder="Kamida 8 belgi"
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
             />
 
-            <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
-              <input
-                id="registration-terms"
-                type="checkbox"
-                required
-                checked={registrationTermsAccepted}
-                onChange={event => {
-                  setRegistrationTermsAccepted(event.target.checked);
-                  if (event.target.checked) setRegistrationError('');
-                }}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
-              />
-              <span className="text-sm leading-relaxed text-yellow-500">
-                Men qoidalarga roziman. Barcha yutuqlarim, xarid qilingan Coin va statuslar faqat ushbu brauzer xotirasida saqlanishini, agar brauzer tarixini (cache) tozalasam yoki boshqa qurilmadan kirsam, ular qayta tiklanmasdan o'chib ketishini tushunaman.
-              </span>
-            </label>
+            {authMode === 'register' && (
+              <>
+                <label htmlFor="registration-name" className="mt-4 block text-xs font-semibold text-slate-300">Ism</label>
+                <input
+                  id="registration-name"
+                  autoComplete="given-name"
+                  maxLength={50}
+                  required
+                  value={registrationName}
+                  onChange={event => setRegistrationName(event.target.value)}
+                  placeholder="Ismingiz"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
+
+                <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
+                <input
+                  id="registration-age"
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="120"
+                  step="1"
+                  required
+                  value={registrationAge}
+                  onChange={event => setRegistrationAge(event.target.value)}
+                  placeholder="Yoshingiz"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
+
+                <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
+                  <input
+                    id="registration-terms"
+                    type="checkbox"
+                    required
+                    checked={registrationTermsAccepted}
+                    onChange={event => {
+                      setRegistrationTermsAccepted(event.target.checked);
+                      if (event.target.checked) setRegistrationError('');
+                    }}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
+                  />
+                  <span className="text-sm leading-relaxed text-yellow-500">
+                    Men qoidalarga roziman va profilim, Coin hamda statuslar Supabase bulut bazasida saqlanishini tushunaman.
+                  </span>
+                </label>
+              </>
+            )}
 
             {registrationError && (
               <p role="alert" className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -1817,10 +1539,20 @@ export default function App() {
 
             <button
               type="submit"
-              disabled={!registrationTermsAccepted}
+              disabled={authBusy || (authMode === 'register' && !registrationTermsAccepted)}
               className="mt-6 w-full rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
             >
-              🚀 Kirish
+              {authBusy ? '⏳ Kutilmoqda...' : authMode === 'register' ? '🚀 Hisob yaratish' : '🚀 Kirish'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(previous => previous === 'register' ? 'login' : 'register');
+                setRegistrationError('');
+              }}
+              className="mt-4 w-full text-sm font-semibold text-violet-200 transition hover:text-white"
+            >
+              {authMode === 'register' ? 'Hisobingiz bormi? Tizimga kiring' : "Hisob yo'qmi? Ro'yxatdan o'ting"}
             </button>
           </div>
         </form>
@@ -2019,7 +1751,7 @@ export default function App() {
 
                   <div className="text-3xl font-extrabold mt-1 text-[#FBBF24]">{users.filter(u => u.subscriptionUntil ? Number(u.subscriptionUntil) > Date.now() : u.isPro).length}</div>
 
-                  <div className="text-xs text-green-400 mt-1">Click integratsiya faol</div>
+                  <div className="text-xs text-amber-300 mt-1">To'lov provayderi ulanmagan</div>
 
                 </div>
 
@@ -2139,12 +1871,10 @@ export default function App() {
 
                         <button 
 
-                          onClick={() => {
-
-                            updateUserBalance(u.id, 0, 50, "Admin tomonidan bonus", true);
-
+                          onClick={async () => {
+                            const updated = await updateUserBalance(u.id, 0, 50, "Admin tomonidan bonus", true);
+                            if (!updated) return;
                             setAuditLogs(prev => [{ id: `L-${Date.now()}`, admin: 'Admin', action: `${u.name} ga +50 Coin qo'shildi`, time: 'Hozirgina' }, ...prev]);
-
                             showToast(`${u.name} ga +50 Coin berildi!`);
 
                           }}
@@ -2157,12 +1887,10 @@ export default function App() {
 
                         <button 
 
-                          onClick={() => {
-
-                            updateUserBalance(u.id, 100, 0, "Admin XP mukofoti", true);
-
+                          onClick={async () => {
+                            const updated = await updateUserBalance(u.id, 100, 0, "Admin XP mukofoti", true);
+                            if (!updated) return;
                             setAuditLogs(prev => [{ id: `L-${Date.now()}`, admin: 'Admin', action: `${u.name} ga +100 XP qo'shildi`, time: 'Hozirgina' }, ...prev]);
-
                             showToast(`${u.name} ga +100 XP berildi!`);
 
                           }}
@@ -2954,16 +2682,10 @@ export default function App() {
 
             <div className="flex justify-between items-center border-b border-white/10 pb-3">
 
-              <div className="flex items-center gap-2">
-
-                <div className="flex items-center gap-1.5">
-                  <span className="rounded-lg bg-blue-500 px-2 py-2 font-extrabold text-white text-[10px]">CLICK</span>
-                  <span className="rounded-lg bg-sky-500 px-2 py-2 font-extrabold text-white text-[10px]">PAYME</span>
+                <div className="flex items-center gap-2">
+                  <CreditCard className="text-amber-300" size={20} />
+                  <span className="font-bold text-sm">To'lov xizmati</span>
                 </div>
-
-                <span className="font-bold text-sm">To'lov usulini tanlang</span>
-
-              </div>
 
               <button onClick={() => setPaymentModal(null)} className="text-[#A7A0B5] hover:text-white">
 
@@ -2975,113 +2697,18 @@ export default function App() {
 
 
 
-            <div className="bg-black/30 p-4 rounded-2xl border border-white/5 text-center">
-
-              <div className="text-xs text-[#A7A0B5]">{paymentModal.title}</div>
-
-              {paymentModal.amountUZS ? (
-                <div className="text-2xl font-extrabold text-[#FBBF24] mt-1">{paymentModal.amountUZS.toLocaleString('uz-UZ')} so'm</div>
-              ) : (
-                <>
-                  <div className="text-2xl font-extrabold text-[#FBBF24] mt-1">${paymentModal.amountUSD.toFixed(2)}</div>
-                  <div className="text-[11px] text-[#A7A0B5] mt-0.5">≈ {(paymentModal.amountUSD * 12800).toLocaleString()} UZS</div>
-                </>
-              )}
-
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/5 p-4">
+              <p className="text-sm font-bold text-amber-200">Haqiqiy to'lov provayderi ulanmagan</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-300">
+                Karta ma'lumotlarini bu ilovaga kiritmang. {paymentModal.title} xaridi hozircha o'chirilgan; to'lov integratsiyasi tasdiqlangach bu oynadan foydalanish mumkin bo'ladi.
+              </p>
             </div>
-
-
-
-            {paymentStep === 1 ? (
-
-              <div className="space-y-3">
-
-                <div>
-
-                  <label className="text-xs text-[#A7A0B5]">Karta raqami (Uzcard / Humo)</label>
-
-                  <input 
-
-                    type="text"
-
-                    maxLength={19}
-
-                    value={cardNumber}
-
-                    onChange={(e) => setCardNumber(e.target.value)}
-
-                    placeholder="8600 0000 0000 0000"
-
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm mt-1 focus:outline-none focus:border-blue-400"
-
-                  />
-
-                </div>
-
-                <div>
-
-                  <label className="text-xs text-[#A7A0B5]">Amal qilish muddati</label>
-
-                  <input 
-
-                    type="text"
-
-                    maxLength={5}
-
-                    value={cardExpiry}
-
-                    onChange={(e) => setCardExpiry(e.target.value)}
-
-                    placeholder="08/28"
-
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm mt-1 focus:outline-none focus:border-blue-400"
-
-                  />
-
-                </div>
-
-              </div>
-
-            ) : (
-
-              <div className="space-y-3">
-
-                <div className="text-xs text-center text-green-400">
-
-                  Telefon raqamingizga tasdiqlash kodi yuborildi (Demo: istalgan 4 ta raqam yozing)
-
-                </div>
-
-                <input 
-
-                  type="text"
-
-                  maxLength={6}
-
-                  value={smsCode}
-
-                  onChange={(e) => setSmsCode(e.target.value)}
-
-                  placeholder="SMS Kod (masalan: 7777)"
-
-                  className="w-full bg-black/40 border border-blue-400 rounded-xl px-4 py-3 text-center tracking-widest font-bold text-lg"
-
-                />
-
-              </div>
-
-            )}
-
-
-
-            <button 
-
-              onClick={handleConfirmClickPayment}
-
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-3.5 rounded-xl text-sm shadow-lg transition-all">
-
-              {paymentStep === 1 ? 'Davom etish' : 'To\'lovni Tasdiqlash'}
-
+            <button
+              type="button"
+              onClick={() => setPaymentModal(null)}
+              className="w-full rounded-xl border border-white/10 bg-white/5 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+            >
+              Yopish
             </button>
 
           </div>
@@ -3153,18 +2780,31 @@ export default function App() {
 
             </button>
 
-            <button 
+            {authUser?.app_metadata?.role === 'admin' && (
+              <button
+                onClick={() => setIsAdminMode(true)}
+                title="Admin Panelga O'tish"
+                className="flex items-center gap-1 bg-[#8B5CF6]/15 hover:bg-[#8B5CF6]/30 text-[#C4B5FD] border border-[#8B5CF6]/40 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-all"
+              >
+                <Shield size={14} />
+                <span>Admin</span>
+              </button>
+            )}
 
-              onClick={() => setIsAdminMode(true)}
-
-              title="Admin Panelga O'tish"
-
-              className="flex items-center gap-1 bg-[#8B5CF6]/15 hover:bg-[#8B5CF6]/30 text-[#C4B5FD] border border-[#8B5CF6]/40 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-all">
-
-              <Shield size={14} />
-
-              <span>Admin</span>
-
+            <button
+              type="button"
+              title="Tizimdan chiqish"
+              aria-label="Tizimdan chiqish"
+              onClick={async () => {
+                const { error } = await supabase.auth.signOut();
+                if (error) {
+                  console.error('Could not sign out:', error);
+                  showToast("Hisobdan chiqib bo'lmadi.", 'error');
+                }
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              <LogOut size={14} />
             </button>
 
           </div>
@@ -3781,8 +3421,7 @@ export default function App() {
                           disabled={equipped}
                           onClick={() => {
                             if (owned) {
-                              setUsers(prev => prev.map(u => u.id === currentUser.id ? { ...u, equipped: { ...u.equipped, [item.category]: item.value } } : u));
-                              showToast(`${item.name} profilga o'rnatildi!`);
+                              void equipShopItem(item);
                               return;
                             }
 
@@ -3791,13 +3430,7 @@ export default function App() {
                               return;
                             }
 
-                            updateUserBalance(currentUser.id, 0, -item.price, `Do'kondan xarid: ${item.name}`);
-                            setUsers(prev => prev.map(u => u.id === currentUser.id ? {
-                              ...u,
-                              ownedItems: [...u.ownedItems, item.id],
-                              equipped: { ...u.equipped, [item.category]: item.value }
-                            } : u));
-                            showToast(`${item.name} xarid qilindi va o'rnatildi!`);
+                            void purchaseShopItem(item);
                           }}
                           className={`shrink-0 rounded-xl px-3 py-2 text-[10px] font-extrabold transition-all ${equipped ? 'cursor-default bg-amber-300/15 text-amber-200' : owned ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' : 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_4px_16px_rgba(139,92,246,0.2)] hover:brightness-110'}`}>
                           {equipped ? 'Faol' : owned ? "O'rnatish" : 'Sotib olish'}
@@ -4188,8 +3821,7 @@ export default function App() {
                 <div>
                   <h2 className="text-xl font-bold">Testlar Bo'limi</h2>
                   <p className="mt-1 text-[10px] text-[#A7A0B5]">
-                    Haftalik mukofot: {Math.min(weeklyTestCompletions, 3)}/3
-                    {weeklyTestCompletions >= 3 ? ' • Keyingi yechimlar: 0 XP + 30 Coin' : ' • Dastlabki 3 yechim mukofotli'}
+                    Testlar hozircha shu qurilmada saqlanadi; balansga bog'langan mukofotlar testlar bulutga ko'chirilgach yoqiladi.
                   </p>
                 </div>
 
@@ -4331,7 +3963,7 @@ export default function App() {
             <div className="space-y-5 animate-in fade-in duration-300">
 
               <h2 className="text-xl font-bold">Global XP Reyting</h2>
-              <p className="text-xs text-[#A7A0B5]">Bu qurilmada ro'yxatdan o'tgan foydalanuvchi reytingi.</p>
+              <p className="text-xs text-[#A7A0B5]">Supabase profillari real vaqtda sinxronlanadi.</p>
 
 
 
@@ -4473,13 +4105,11 @@ export default function App() {
 
                           disabled={done}
 
-                          onClick={() => {
-
+                          onClick={async () => {
+                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, ch.id);
+                            if (!rewarded) return;
                             setChallenges(prev => prev.map(item => item.id === ch.id ? { ...item, votesA: item.votesA + 1, completedBy: [...item.completedBy, currentUser.id] } : item));
-
-                            updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`);
-
-                            showToast(`Tanlovingiz qabul qilindi! +${settings.xpChallenge} XP va +${settings.coinChallenge} Coin!`);
+                            showToast('Tanlovingiz qabul qilindi! +15 XP va +8 Coin!');
 
                           }}
 
@@ -4501,13 +4131,11 @@ export default function App() {
 
                           disabled={done}
 
-                          onClick={() => {
-
+                          onClick={async () => {
+                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, ch.id);
+                            if (!rewarded) return;
                             setChallenges(prev => prev.map(item => item.id === ch.id ? { ...item, votesB: item.votesB + 1, completedBy: [...item.completedBy, currentUser.id] } : item));
-
-                            updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`);
-
-                            showToast(`Tanlovingiz qabul qilindi! +${settings.xpChallenge} XP va +${settings.coinChallenge} Coin!`);
+                            showToast('Tanlovingiz qabul qilindi! +15 XP va +8 Coin!');
 
                           }}
 
@@ -4682,25 +4310,6 @@ export default function App() {
               </div>
 
 
-
-              {achievementNotifications.length > 0 && (
-                <section className="space-y-3" aria-label="Yutuqlar bildirishnomalari">
-                  <h3 className="px-1 text-sm font-bold uppercase text-amber-200">Yutuqlar va bildirishnomalar</h3>
-                  {achievementNotifications.map(notification => (
-                    <article key={notification.id} className="rounded-2xl border border-amber-400/25 bg-gradient-to-br from-amber-500/10 to-[#1D1729] p-4">
-                      <div className="flex items-start gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/15 text-amber-200">
-                          <Trophy size={18} />
-                        </span>
-                        <div>
-                          <h4 className="text-sm font-bold text-amber-100">{notification.title}</h4>
-                          <p className="mt-1 text-xs leading-relaxed text-[#D1CADC]">{notification.message}</p>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </section>
-              )}
 
               {/* Transactions History */}
 
