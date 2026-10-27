@@ -11,7 +11,7 @@ import {
 
   ChevronRight, ArrowLeft, Send, Image as ImageIcon, RefreshCw, 
 
-  Award, Clock, CheckCircle2, HelpCircle, LogOut, Sliders, Heart, Bird,
+  Award, Clock, CheckCircle2, HelpCircle, Sliders, Heart, Bird,
   Flame, Crown, Star, BadgeCheck, Copy
 
 } from 'lucide-react';
@@ -265,9 +265,6 @@ export default function App() {
   const [registeredProfile, setRegisteredProfile] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
-  const [authMode, setAuthMode] = useState('register');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [avatarDataUrl, setAvatarDataUrl] = useState(loadSavedAvatar);
   const [isAvatarDragOver, setIsAvatarDragOver] = useState(false);
@@ -1336,28 +1333,18 @@ export default function App() {
     event.preventDefault();
 
     if (authBusy) return;
-    if (authMode === 'register' && !registrationTermsAccepted) {
+    if (!registrationTermsAccepted) {
       setRegistrationError("Davom etish uchun foydalanish shartlariga rozilik bildiring.");
-      return;
-    }
-
-    const email = authEmail.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setRegistrationError("Yaroqli email manzilini kiriting.");
-      return;
-    }
-    if (authPassword.length < 8) {
-      setRegistrationError("Parol kamida 8 belgidan iborat bo'lishi kerak.");
       return;
     }
 
     const name = registrationName.trim();
     const age = Number(registrationAge);
-    if (authMode === 'register' && !name) {
-      setRegistrationError("Ismingizni kiriting.");
+    if (!name) {
+      setRegistrationError("Nick kiriting.");
       return;
     }
-    if (authMode === 'register' && (!Number.isInteger(age) || age < 1 || age > 120)) {
+    if (!Number.isInteger(age) || age < 1 || age > 120) {
       setRegistrationError("Yosh 1 dan 120 gacha bo'lgan butun son bo'lishi kerak.");
       return;
     }
@@ -1365,24 +1352,17 @@ export default function App() {
     setAuthBusy(true);
     setRegistrationError('');
     try {
-      if (authMode === 'register') {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: authPassword,
-          options: { data: { display_name: name, age } }
-        });
-        if (error) throw error;
-        if (!data.session) {
-          setRegistrationError("Hisob yaratildi. Email'ingizni tasdiqlang, so'ng tizimga kiring.");
-          setAuthMode('login');
-        }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
-        if (error) throw error;
-      }
+      const { error } = await supabase.auth.signInAnonymously({
+        options: { data: { display_name: name, age } }
+      });
+      if (error) throw error;
     } catch (error) {
-      console.error('Supabase authentication failed:', error);
-      setRegistrationError(error.message || "Hisobga kirib bo'lmadi. Ma'lumotlarni tekshiring.");
+      console.error('Anonymous Supabase registration failed:', error);
+      setRegistrationError(
+        error.message?.toLowerCase().includes('anonymous')
+          ? "Supabase'da Anonymous Sign-Ins yoqilmagan. Authentication → Sign In / Providers → Anonymous Sign-Ins bo'limida yoqing."
+          : error.message || "Hisob yaratib bo'lmadi. Qayta urinib ko'ring."
+      );
     } finally {
       setAuthBusy(false);
     }
@@ -1476,85 +1456,58 @@ export default function App() {
               A
             </div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-violet-300">ANONI</p>
-            <h1 className="mt-2 text-2xl font-extrabold">
-              {authMode === 'register' ? 'Hisob yarating' : 'Hisobingizga kiring'}
-            </h1>
+            <h1 className="mt-2 text-2xl font-extrabold">ANONI’ga kirish</h1>
             <p className="mt-2 text-sm leading-relaxed text-[#A7A0B5]">
-              Profilingiz, Coin va XP xavfsiz tarzda Supabase bulut bazasida saqlanadi va reyting barcha foydalanuvchilar uchun sinxronlanadi.
+              Faqat nick va yoshingizni kiriting. Email va parol kerak emas.
             </p>
 
-            <label htmlFor="registration-email" className="mt-6 block text-xs font-semibold text-slate-300">Email</label>
+            <label htmlFor="registration-name" className="mt-6 block text-xs font-semibold text-slate-300">Nick</label>
             <input
-              id="registration-email"
-              type="email"
-              autoComplete="email"
+              id="registration-name"
+              autoComplete="nickname"
+              maxLength={50}
               required
-              value={authEmail}
-              onChange={event => setAuthEmail(event.target.value)}
-              placeholder="name@example.com"
+              value={registrationName}
+              onChange={event => setRegistrationName(event.target.value)}
+              placeholder="Saytdagi ismingiz"
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
             />
 
-            <label htmlFor="registration-password" className="mt-4 block text-xs font-semibold text-slate-300">Parol</label>
+            <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
             <input
-              id="registration-password"
-              type="password"
-              autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-              minLength={8}
+              id="registration-age"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="120"
+              step="1"
               required
-              value={authPassword}
-              onChange={event => setAuthPassword(event.target.value)}
-              placeholder="Kamida 8 belgi"
+              value={registrationAge}
+              onChange={event => setRegistrationAge(event.target.value)}
+              placeholder="Yoshingiz"
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
             />
 
-            {authMode === 'register' && (
-              <>
-                <label htmlFor="registration-name" className="mt-4 block text-xs font-semibold text-slate-300">Ism</label>
-                <input
-                  id="registration-name"
-                  autoComplete="given-name"
-                  maxLength={50}
-                  required
-                  value={registrationName}
-                  onChange={event => setRegistrationName(event.target.value)}
-                  placeholder="Ismingiz"
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
-                />
+            <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
+              <input
+                id="registration-terms"
+                type="checkbox"
+                required
+                checked={registrationTermsAccepted}
+                onChange={event => {
+                  setRegistrationTermsAccepted(event.target.checked);
+                  if (event.target.checked) setRegistrationError('');
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
+              />
+              <span className="text-sm leading-relaxed text-yellow-500">
+                Qoidalarga roziman. Profilim shu brauzer va qurilmada saqlanishini, boshqa qurilmada nickni yozish avvalgi profilimni tiklamasligini tushunaman.
+              </span>
+            </label>
 
-                <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
-                <input
-                  id="registration-age"
-                  type="number"
-                  inputMode="numeric"
-                  min="1"
-                  max="120"
-                  step="1"
-                  required
-                  value={registrationAge}
-                  onChange={event => setRegistrationAge(event.target.value)}
-                  placeholder="Yoshingiz"
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
-                />
-
-                <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
-                  <input
-                    id="registration-terms"
-                    type="checkbox"
-                    required
-                    checked={registrationTermsAccepted}
-                    onChange={event => {
-                      setRegistrationTermsAccepted(event.target.checked);
-                      if (event.target.checked) setRegistrationError('');
-                    }}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
-                  />
-                  <span className="text-sm leading-relaxed text-yellow-500">
-                    Men qoidalarga roziman va profilim, Coin hamda statuslar Supabase bulut bazasida saqlanishini tushunaman.
-                  </span>
-                </label>
-              </>
-            )}
+            <p className="mt-3 text-xs leading-relaxed text-slate-400">
+              Eslatma: boshqa telefonda kirsangiz, u yerda alohida profil yaratiladi.
+            </p>
 
             {registrationError && (
               <p role="alert" className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -1564,20 +1517,10 @@ export default function App() {
 
             <button
               type="submit"
-              disabled={authBusy || (authMode === 'register' && !registrationTermsAccepted)}
+              disabled={authBusy || !registrationTermsAccepted}
               className="mt-6 w-full rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
             >
-              {authBusy ? '⏳ Kutilmoqda...' : authMode === 'register' ? '🚀 Hisob yaratish' : '🚀 Kirish'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode(previous => previous === 'register' ? 'login' : 'register');
-                setRegistrationError('');
-              }}
-              className="mt-4 w-full text-sm font-semibold text-violet-200 transition hover:text-white"
-            >
-              {authMode === 'register' ? 'Hisobingiz bormi? Tizimga kiring' : "Hisob yo'qmi? Ro'yxatdan o'ting"}
+              {authBusy ? '⏳ Kutilmoqda...' : '🚀 Boshlash'}
             </button>
           </div>
         </form>
@@ -2815,22 +2758,6 @@ export default function App() {
                 <span>Admin</span>
               </button>
             )}
-
-            <button
-              type="button"
-              title="Tizimdan chiqish"
-              aria-label="Tizimdan chiqish"
-              onClick={async () => {
-                const { error } = await supabase.auth.signOut();
-                if (error) {
-                  console.error('Could not sign out:', error);
-                  showToast("Hisobdan chiqib bo'lmadi.", 'error');
-                }
-              }}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
-            >
-              <LogOut size={14} />
-            </button>
 
           </div>
 
