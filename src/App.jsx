@@ -529,7 +529,7 @@ export default function App() {
       queueMicrotask(() => { void syncSession(session); });
     });
 
-    supabase.auth.getSession().then(({ data, error }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
       if (!active) return;
       if (error) {
         console.error('Could not restore the Supabase session:', error);
@@ -537,7 +537,20 @@ export default function App() {
         setAuthLoading(false);
         return;
       }
-      void syncSession(data.session);
+      if (!data.session) {
+        void syncSession(null);
+        return;
+      }
+
+      const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+      if (!active) return;
+      if (refreshError) {
+        console.error('Could not refresh the Supabase session:', refreshError);
+        setRegistrationError("Hisob sessiyasini yangilab bo'lmadi. Sahifani qayta yuklang va hisobdan chiqmang.");
+        setAuthLoading(false);
+        return;
+      }
+      void syncSession(refreshedData.session);
     });
 
     return () => {
