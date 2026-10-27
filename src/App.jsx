@@ -293,6 +293,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
   const [accountActionModal, setAccountActionModal] = useState(null);
+  const [testShareModal, setTestShareModal] = useState(null);
   const [dailyTestCreationProgress, setDailyTestCreationProgress] = useState(() => {
     return { date: getUTCDateKey(), count: 0 };
   });
@@ -322,6 +323,51 @@ export default function App() {
     } catch (error) {
       console.error('Could not copy the public ID:', error);
       showToast("ID nusxa olinmadi. Brauzer ruxsatlarini tekshiring.", 'error');
+    }
+  };
+
+  const getTestShareMessage = test => (
+    `Men ANONI’da "${test.title}" nomli yangi test yaratdim! ANONI’ga kiring: ${window.location.origin}`
+  );
+
+  const handleShareCreatedTest = async () => {
+    if (!testShareModal) return;
+    const shareData = {
+      title: `ANONI testi: ${testShareModal.title}`,
+      text: getTestShareMessage(testShareModal)
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setTestShareModal(null);
+        return;
+      }
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Share and clipboard APIs are unavailable.');
+      }
+      await navigator.clipboard.writeText(shareData.text);
+      setTestShareModal(null);
+      showToast('Ulashish matni nusxalandi!');
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      console.error('Could not share the created test:', error);
+      showToast("Ulashib bo'lmadi. Yana bir bor urinib ko'ring.", 'error');
+    }
+  };
+
+  const handleCopyTestInvite = async () => {
+    if (!testShareModal) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable.');
+      }
+      await navigator.clipboard.writeText(getTestShareMessage(testShareModal));
+      showToast('Test taklif matni nusxalandi!');
+      setTestShareModal(null);
+    } catch (error) {
+      console.error('Could not copy the test invite:', error);
+      showToast("Taklifni nusxalab bo'lmadi. Brauzer ruxsatlarini tekshiring.", 'error');
     }
   };
 
@@ -1147,6 +1193,7 @@ export default function App() {
     const rewarded = await updateUserBalance(currentUser.id, 50, 0, `Yangi test yaratildi (${newTest.id})`);
     if (!rewarded) return;
     setTests(prev => [newTest, ...prev]);
+    setTestShareModal({ title: newTest.title });
     showToast("+50 XP: Yangi test muvaffaqiyatli yaratildi!");
 
 
@@ -2639,6 +2686,52 @@ export default function App() {
         </div>
       )}
 
+
+      {testShareModal && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="test-share-title"
+            className="w-full max-w-sm rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#211832] via-[#171323] to-[#100D18] p-6 shadow-[0_0_50px_rgba(139,92,246,0.2)]"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-violet-300">Test tayyor</p>
+                <h2 id="test-share-title" className="mt-2 text-xl font-extrabold">Do‘stlarga yuboring</h2>
+                <p className="mt-2 text-sm text-slate-300">{testShareModal.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTestShareModal(null)}
+                aria-label="Oynani yopish"
+                className="rounded-xl border border-white/10 p-2 text-slate-300 transition hover:bg-white/10"
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <p className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-100">
+              Eslatma: hozircha testning o‘zi faqat shu qurilmada ko‘rinadi. Ulashish ANONI saytiga taklif yuboradi; testni boshqa qurilmada ochish uchun testlarni bulutga saqlash funksiyasi kerak.
+            </p>
+            <button
+              type="button"
+              onClick={handleShareCreatedTest}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-violet-950/30 transition hover:brightness-110"
+            >
+              <Share2 size={17} />
+              Natijani yuborish
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyTestInvite}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-200 transition hover:bg-white/10"
+            >
+              <Copy size={15} />
+              Taklif matnini nusxalash
+            </button>
+          </section>
+        </div>
+      )}
 
       {/* Click and Payme Payment Modal */}
 
