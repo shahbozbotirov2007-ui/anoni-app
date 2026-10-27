@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './lib/supabase';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 import { 
 
@@ -264,7 +264,7 @@ const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 export default function App() {
   const [registeredProfile, setRegisteredProfile] = useState(null);
   const [authUser, setAuthUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
   const [authMode, setAuthMode] = useState('register');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -406,6 +406,7 @@ export default function App() {
   const [users, setUsers] = useState([]);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) return undefined;
     let active = true;
     let requestVersion = 0;
 
@@ -1434,6 +1435,30 @@ export default function App() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-300/25 border-t-violet-300" />
           Supabase hisobingiz yuklanmoqda...
         </div>
+      </main>
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#0B0912] px-5 py-8 text-white">
+        <section className="w-full max-w-lg rounded-3xl border border-amber-300/20 bg-gradient-to-br from-[#211832] via-[#15111F] to-[#100D18] p-6 shadow-[0_0_60px_rgba(200,166,106,0.12)] sm:p-8">
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400/10 text-2xl text-amber-200 ring-1 ring-amber-300/20">
+            !
+          </div>
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-amber-200">ANONI sozlamasi kerak</p>
+          <h1 className="mt-2 text-2xl font-extrabold">Sayt hozircha ulanmagan</h1>
+          <p className="mt-3 text-sm leading-relaxed text-[#D1CADC]">
+            Vercel deploy uchun Supabase muhit o‘zgaruvchilari topilmadi. Vercel loyihangizda quyidagi ikkita qiymatni qo‘shing:
+          </p>
+          <ul className="mt-4 space-y-2 rounded-2xl border border-white/10 bg-black/25 p-4 text-sm">
+            <li><code className="text-amber-200">VITE_SUPABASE_URL</code></li>
+            <li><code className="text-amber-200">VITE_SUPABASE_PUBLISHABLE_KEY</code></li>
+          </ul>
+          <p className="mt-4 text-xs leading-relaxed text-slate-400">
+            Vercel → Project Settings → Environment Variables bo‘limida Production va Preview uchun kiriting, saqlang, so‘ng yangi deployment qiling.
+          </p>
+        </section>
       </main>
     );
   }
