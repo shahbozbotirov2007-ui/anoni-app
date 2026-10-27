@@ -2822,9 +2822,20 @@ export default function App() {
             <div className="rounded-2xl border border-amber-400/20 bg-amber-500/5 p-4">
               <p className="text-sm font-bold text-amber-200">Haqiqiy to'lov provayderi ulanmagan</p>
               <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                Karta ma'lumotlarini bu ilovaga kiritmang. {paymentModal.title} xaridi hozircha o'chirilgan; to'lov integratsiyasi tasdiqlangach bu oynadan foydalanish mumkin bo'ladi.
+                Karta ma'lumotlarini bu ilovaga kiritmang. {paymentModal.title} olish uchun Telegram orqali admin bilan bog'laning. To'lov va PRO faollashtirish admin bilan kelishiladi.
               </p>
             </div>
+            <a
+              href={`https://t.me/SHAHBOZBE0770?text=${encodeURIComponent(
+                `Assalomu alaykum! ANONI PRO obunasini olmoqchiman.\nIsm: ${currentUser.name}\nID: ${registeredProfile.publicId}\nTarif: ${paymentModal.title}${paymentModal.amountUSD ? ` ($${paymentModal.amountUSD})` : ''}`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-blue-950/30 transition hover:brightness-110"
+            >
+              <Send size={17} />
+              Telegram orqali PRO so‘rash
+            </a>
             <button
               type="button"
               onClick={() => setPaymentModal(null)}
