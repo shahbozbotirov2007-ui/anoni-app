@@ -304,6 +304,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
   const [accountActionModal, setAccountActionModal] = useState(null);
+  const [accountActionBusy, setAccountActionBusy] = useState(false);
   const [testShareModal, setTestShareModal] = useState(null);
   const [testCreationStatus, setTestCreationStatus] = useState({ profileId: null, pausedUntil: null, error: false });
   const [clockNow, setClockNow] = useState(0);
@@ -385,6 +386,7 @@ export default function App() {
   };
 
   const applyAccountAction = async (userId, action, duration) => {
+    if (accountActionBusy) return;
     const targetUser = users.find(user => user.id === userId);
     if (!targetUser) {
       showToast("Foydalanuvchi topilmadi. Sahifani yangilang.", 'error');
@@ -399,39 +401,61 @@ export default function App() {
       : actionType === 'subscription'
         ? new Date(addCalendarDuration(Math.max(Number(targetUser.subscriptionUntil) || Date.now(), Date.now()), duration)).toISOString()
         : new Date(addCalendarDuration(Date.now(), duration)).toISOString();
-    const { error } = await supabase.rpc('admin_set_account_status', {
-      p_user_id: userId,
-      p_action: actionType,
-      p_until: actionUntil
-    });
-    if (error) {
-      console.error('Could not update account status:', error);
-      showToast(error.message.includes('Admin role required')
-        ? "Bu amal uchun Supabase admin roli talab qilinadi."
-        : "Hisob holatini yangilab bo'lmadi.", 'error');
-      return;
-    }
+    setAccountActionBusy(true);
+    try {
+      const { error } = await supabase.rpc('admin_set_account_status', {
+        p_user_id: userId,
+        p_action: actionType,
+        p_until: actionUntil
+      });
+      if (error) {
+        console.error('Could not update account status:', error);
+        showToast(error.message.includes('Admin role required')
+          ? "Bu amal uchun Supabase admin roli talab qilinadi."
+          : `Hisob holatini yangilab bo'lmadi: ${error.message}`, 'error');
+        return;
+      }
 
-    const auditMessage = action === 'subscription'
-      ? `${targetUser.name} ga PRO obuna ${duration.permanent ? 'doimiy' : `${duration.label} muddatga`} berildi`
-      : action === 'ban'
-        ? `${targetUser.name} ${duration.label} muddatga BAN qilindi`
-        : `${targetUser.name} BANdan ochildi`;
-    setAuditLogs(previousLogs => [{
-      id: `L-${Date.now()}`,
-      admin: 'Admin',
-      action: auditMessage,
-      time: 'Hozirgina'
-    }, ...previousLogs]);
-    setAccountActionModal(null);
-    showToast(
-      action === 'subscription'
-        ? `${targetUser.name} ga ${duration.permanent ? 'doimiy PRO' : `${duration.label} obuna`} berildi!`
+      const statusUpdate = action === 'ban'
+        ? { bannedUntil: Date.parse(actionUntil), ban: { duration: duration.label, bannedUntil: Date.parse(actionUntil) } }
+        : action === 'unban'
+          ? { bannedUntil: null, ban: null }
+          : actionType === 'subscription_permanent'
+            ? { subscriptionUntil: null, subscriptionPermanent: true, isPro: true }
+            : { subscriptionUntil: Date.parse(actionUntil), subscriptionPermanent: false, isPro: true };
+      setUsers(previousUsers => previousUsers.map(user => user.id === userId
+        ? { ...user, ...statusUpdate }
+        : user));
+      setRegisteredProfile(previousProfile => previousProfile?.id === userId
+        ? { ...previousProfile, ...statusUpdate }
+        : previousProfile);
+
+      const auditMessage = action === 'subscription'
+        ? `${targetUser.name} ga PRO obuna ${duration.permanent ? 'doimiy' : `${duration.label} muddatga`} berildi`
         : action === 'ban'
-          ? `${targetUser.name} ${duration.label} muddatga bloklandi.`
-          : `${targetUser.name} blokdan chiqarildi.`,
-      action === 'ban' ? 'error' : 'success'
-    );
+          ? `${targetUser.name} ${duration.label} muddatga BAN qilindi`
+          : `${targetUser.name} BANdan ochildi`;
+      setAuditLogs(previousLogs => [{
+        id: `L-${Date.now()}`,
+        admin: 'Admin',
+        action: auditMessage,
+        time: 'Hozirgina'
+      }, ...previousLogs]);
+      setAccountActionModal(null);
+      showToast(
+        action === 'subscription'
+          ? `${targetUser.name} ga ${duration.permanent ? 'doimiy PRO' : `${duration.label} obuna`} berildi!`
+          : action === 'ban'
+            ? `${targetUser.name} ${duration.label} muddatga bloklandi.`
+            : `${targetUser.name} blokdan chiqarildi.`,
+        action === 'ban' ? 'error' : 'success'
+      );
+    } catch (error) {
+      console.error('Could not apply account status:', error);
+      showToast(`Hisob holatini yangilab bo'lmadi: ${error.message}`, 'error');
+    } finally {
+      setAccountActionBusy(false);
+    }
   };
 
   const setLeaderboardVisibility = async targetUser => {
@@ -2539,8 +2563,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setAccountActionModal(null)}
+                    disabled={accountActionBusy}
                     aria-label="Oynani yopish"
-                    className="rounded-xl border border-white/10 p-2 text-slate-300 transition hover:bg-white/10"
+                    className="rounded-xl border border-white/10 p-2 text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <X size={17} />
                   </button>
@@ -2551,21 +2576,23 @@ export default function App() {
                       key={duration.label}
                       type="button"
                       onClick={() => applyAccountAction(accountActionModal.userId, accountActionModal.type, duration)}
-                      className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                      disabled={accountActionBusy}
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-50 ${
                         accountActionModal.type === 'subscription'
                           ? 'border-[#C8A66A]/20 bg-[#C8A66A]/5 text-[#E5CF9B] hover:border-[#C8A66A]/50 hover:bg-[#C8A66A]/10'
                           : 'border-red-400/15 bg-red-500/5 text-red-200 hover:border-red-400/40 hover:bg-red-500/10'
                       }`}
                     >
-                      <span>{duration.label}</span>
-                      <ChevronRight size={16} />
+                      <span>{accountActionBusy ? 'Saqlanmoqda...' : duration.label}</span>
+                      {accountActionBusy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current/30 border-t-current" /> : <ChevronRight size={16} />}
                     </button>
                   ))}
                   {accountActionModal.type === 'ban' && users.find(user => user.id === accountActionModal.userId)?.ban && (
                     <button
                       type="button"
                       onClick={() => applyAccountAction(accountActionModal.userId, 'unban')}
-                      className="mt-1 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/15"
+                      disabled={accountActionBusy}
+                      className="mt-1 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/15 disabled:cursor-wait disabled:opacity-50"
                     >
                       Ban ni bekor qilish
                     </button>
