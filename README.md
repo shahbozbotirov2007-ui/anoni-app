@@ -11,7 +11,7 @@ ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account
 5. Add the same two `VITE_SUPABASE_*` variables in the Vercel project’s environment settings for Preview and Production, then redeploy.
 6. To grant administrator access, set `app_metadata.role` to `admin` for the account using a trusted Supabase administrative tool. Do not use editable user metadata or a client-side flag for authorization. Admin database actions independently verify this role.
 
-The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. Profile reads require an authenticated user.
+The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. The test-creation pause migration disables new tests until 2026-11-03 18:00 Uzbekistan time while leaving existing tests available. Profile reads require an authenticated user.
 
 ## Current data boundaries
 

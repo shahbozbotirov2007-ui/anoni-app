@@ -123,6 +123,14 @@ const LEVEL_THRESHOLDS = [
 ];
 
 const getUTCDateKey = (date = new Date()) => date.toISOString().slice(0, 10);
+const formatUzbekDateTime = timestamp => new Intl.DateTimeFormat('uz-UZ', {
+  timeZone: 'Asia/Tashkent',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+}).format(new Date(timestamp));
 
 const ADMIN_PUBLIC_ID = '777-777';
 
@@ -297,6 +305,8 @@ export default function App() {
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
   const [accountActionModal, setAccountActionModal] = useState(null);
   const [testShareModal, setTestShareModal] = useState(null);
+  const [testCreationStatus, setTestCreationStatus] = useState({ profileId: null, pausedUntil: null, error: false });
+  const [clockNow, setClockNow] = useState(0);
   const [dailyTestCreationProgress, setDailyTestCreationProgress] = useState(() => {
     return { date: getUTCDateKey(), count: 0 };
   });
@@ -598,6 +608,39 @@ export default function App() {
   }, [realtimeUserId]);
 
   const activeProfileId = registeredProfile?.id;
+  const testCreationPauseLoading = Boolean(activeProfileId && testCreationStatus.profileId !== activeProfileId);
+  const testCreationPauseError = testCreationStatus.profileId === activeProfileId && testCreationStatus.error;
+  const testCreationPausedUntil = testCreationStatus.profileId === activeProfileId
+    ? testCreationStatus.pausedUntil
+    : null;
+  const isTestCreationPaused = Boolean(testCreationPausedUntil && testCreationPausedUntil > clockNow);
+  const testCreationUnavailable = !activeProfileId || testCreationPauseLoading || testCreationPauseError || isTestCreationPaused;
+  useEffect(() => {
+    if (!activeProfileId) return undefined;
+    let active = true;
+    supabase.rpc('get_test_creation_status').then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        console.error('Could not load test creation availability:', error);
+        setTestCreationStatus({ profileId: activeProfileId, pausedUntil: null, error: true });
+        return;
+      }
+      setTestCreationStatus({
+        profileId: activeProfileId,
+        pausedUntil: data ? Date.parse(data) : null,
+        error: false
+      });
+      setClockNow(Date.now());
+    });
+
+    return () => { active = false; };
+  }, [activeProfileId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     if (!activeProfileId) return undefined;
     let active = true;
@@ -704,6 +747,8 @@ export default function App() {
       console.error('Could not apply cloud balance change:', error);
       showToast(error.message.includes('Admin role required')
         ? "Bu amal uchun Supabase admin roli talab qilinadi."
+        : error.message.includes('Test yaratish vaqtincha yopiq')
+          ? error.message
         : error.message.includes('limit')
           ? "Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!"
           : "Balansni yangilab bo'lmadi. Amal serverda rad etildi.", 'error');
@@ -1183,6 +1228,14 @@ export default function App() {
 
 
   const handlePublishTest = async () => {
+    if (testCreationPauseLoading || testCreationPauseError) {
+      showToast("Test yaratish holatini tekshirib bo'lmadi. Keyinroq qayta urinib ko'ring.", "error");
+      return;
+    }
+    if (isTestCreationPaused) {
+      showToast(`Test yaratish ${formatUzbekDateTime(testCreationPausedUntil)} gacha vaqtincha yopiq.`, "error");
+      return;
+    }
     if (dailyTestCreationCount >= 2) {
       showToast("Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!", "error");
       return;
@@ -3205,13 +3258,12 @@ export default function App() {
                 </button>
 
                 <button 
-
                   onClick={handlePublishTest}
-                  disabled={reachedDailyTestCreationLimit}
+                  disabled={reachedDailyTestCreationLimit || testCreationUnavailable}
 
                   className="w-full py-4 rounded-xl bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white font-bold shadow-[0_0_20px_rgba(139,92,246,0.5)] disabled:cursor-not-allowed disabled:opacity-50">
 
-                  Testni Faollashtirish (30 soat)
+                  {isTestCreationPaused ? 'Test yaratish vaqtincha yopiq' : 'Testni Faollashtirish (30 soat)'}
 
                 </button>
 
@@ -3943,18 +3995,25 @@ export default function App() {
                 </div>
 
                 <button 
-
                   onClick={() => {
+                    if (testCreationPauseLoading || testCreationPauseError) {
+                      showToast("Test yaratish holatini tekshirib bo'lmadi. Keyinroq qayta urinib ko'ring.", "error");
+                      return;
+                    }
+                    if (isTestCreationPaused) {
+                      showToast(`Test yaratish ${formatUzbekDateTime(testCreationPausedUntil)} gacha vaqtincha yopiq.`, "error");
+                      return;
+                    }
                     if (reachedDailyTestCreationLimit) {
                       showToast("Kunlik test yaratish limitiga yetdingiz (2/2). Ertagacha kuting!", "error");
                       return;
                     }
                     setSubView('create_test');
                   }}
-                  disabled={reachedDailyTestCreationLimit}
-                  className="bg-[#8B5CF6] hover:bg-[#7C3AED] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_rgba(139,92,246,0.4)]">
+                  disabled={reachedDailyTestCreationLimit || testCreationUnavailable}
+                  className="bg-[#8B5CF6] hover:bg-[#7C3AED] text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-[0_0_15px_rgba(139,92,246,0.4)] disabled:cursor-not-allowed disabled:opacity-50">
 
-                  <Plus size={16} /> Test Yaratish
+                  <Plus size={16} /> {isTestCreationPaused ? 'Vaqtincha yopiq' : 'Test Yaratish'}
 
                 </button>
 
@@ -3966,7 +4025,23 @@ export default function App() {
                 </div>
               )}
 
-              {!reachedDailyTestCreationLimit && (
+              {isTestCreationPaused && (
+                <div role="status" className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-200">
+                  Yangi test yaratish vaqtincha yopiq. {formatUzbekDateTime(testCreationPausedUntil)} dan keyin avtomatik ochiladi. Mavjud testlarni ko‘rish va yechish mumkin.
+                </div>
+              )}
+              {testCreationPauseLoading && (
+                <div role="status" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
+                  Test yaratish holati tekshirilmoqda...
+                </div>
+              )}
+              {testCreationPauseError && (
+                <div role="alert" className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs font-semibold text-red-200">
+                  Test yaratish sozlamasini yuklab bo‘lmadi. Iltimos, keyinroq urinib ko‘ring yoki administratorga xabar bering.
+                </div>
+              )}
+
+              {!reachedDailyTestCreationLimit && !testCreationUnavailable && (
                 <p className="text-[10px] text-[#A7A0B5]">
                   Bugungi test yaratish: {dailyTestCreationCount}/2
                 </p>
