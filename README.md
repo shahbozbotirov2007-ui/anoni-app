@@ -4,14 +4,14 @@ ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account
 
 ## Supabase setup
 
-1. Create a Supabase project and apply `supabase/migrations/202607150001_profiles_auth.sql` in the Supabase SQL Editor.
+1. Create a Supabase project and apply `supabase/migrations/202607150001_profiles_auth.sql` in the Supabase SQL Editor. For an existing project, also apply later migration files in timestamp order.
 2. In **Authentication → URL Configuration**, set the production site URL to `https://anoni-app.vercel.app`; add `http://localhost:5173` and the production URL to the redirect allow list.
 3. In **Authentication → Sign In / Providers**, enable **Anonymous Sign-Ins**. Participants then enter only a nickname and age; they do not need email or password.
 4. For local development, copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is intended for browser use; never put a Supabase secret/service-role key in a `VITE_` variable.
 5. Add the same two `VITE_SUPABASE_*` variables in the Vercel project’s environment settings for Preview and Production, then redeploy.
 6. To grant administrator access, set `app_metadata.role` to `admin` for the account using a trusted Supabase administrative tool. Do not use editable user metadata or a client-side flag for authorization. Admin database actions independently verify this role.
 
-The migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. Profile reads require an authenticated user.
+The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. Profile reads require an authenticated user.
 
 ## Current data boundaries
 

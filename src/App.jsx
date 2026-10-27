@@ -144,8 +144,10 @@ const mapProfileRow = row => ({
   xp: row.xp,
   coins: row.coins,
   subscriptionUntil: row.subscription_until ? Date.parse(row.subscription_until) : null,
+  subscriptionPermanent: Boolean(row.subscription_permanent),
   bannedUntil: row.banned_until ? Date.parse(row.banned_until) : null,
-  isPro: Boolean(row.subscription_until && Date.parse(row.subscription_until) > Date.now()),
+  isPro: Boolean(row.subscription_permanent || (row.subscription_until && Date.parse(row.subscription_until) > Date.now())),
+  leaderboardHidden: Boolean(row.leaderboard_hidden),
   ownedItems: row.owned_items || [],
   testsCreatedToday: row.tests_created_date === getUTCDateKey() ? row.tests_created_count : 0,
   testsCreatedDate: row.tests_created_date,
@@ -187,7 +189,8 @@ const ADMIN_PROFILE = {
 const SUBSCRIPTION_DURATIONS = [
   { label: '1 oylik', months: 1 },
   { label: '2 oylik', months: 2 },
-  { label: '3 oylik', months: 3 }
+  { label: '3 oylik', months: 3 },
+  { label: 'Doimiy', permanent: true }
 ];
 const BAN_DURATIONS = [
   { label: '1 kunlik', days: 1 },
@@ -378,14 +381,17 @@ export default function App() {
       return;
     }
 
-    const actionUntil = action === 'unban'
+    const actionType = action === 'subscription' && duration?.permanent
+      ? 'subscription_permanent'
+      : action;
+    const actionUntil = actionType === 'unban' || actionType === 'subscription_permanent'
       ? null
-      : action === 'subscription'
+      : actionType === 'subscription'
         ? new Date(addCalendarDuration(Math.max(Number(targetUser.subscriptionUntil) || Date.now(), Date.now()), duration)).toISOString()
         : new Date(addCalendarDuration(Date.now(), duration)).toISOString();
     const { error } = await supabase.rpc('admin_set_account_status', {
       p_user_id: userId,
-      p_action: action,
+      p_action: actionType,
       p_until: actionUntil
     });
     if (error) {
@@ -397,7 +403,7 @@ export default function App() {
     }
 
     const auditMessage = action === 'subscription'
-      ? `${targetUser.name} ga PRO obuna ${duration.label} muddatga berildi`
+      ? `${targetUser.name} ga PRO obuna ${duration.permanent ? 'doimiy' : `${duration.label} muddatga`} berildi`
       : action === 'ban'
         ? `${targetUser.name} ${duration.label} muddatga BAN qilindi`
         : `${targetUser.name} BANdan ochildi`;
@@ -410,12 +416,41 @@ export default function App() {
     setAccountActionModal(null);
     showToast(
       action === 'subscription'
-        ? `${targetUser.name} ga ${duration.label} obuna berildi!`
+        ? `${targetUser.name} ga ${duration.permanent ? 'doimiy PRO' : `${duration.label} obuna`} berildi!`
         : action === 'ban'
           ? `${targetUser.name} ${duration.label} muddatga bloklandi.`
           : `${targetUser.name} blokdan chiqarildi.`,
       action === 'ban' ? 'error' : 'success'
     );
+  };
+
+  const setLeaderboardVisibility = async targetUser => {
+    const hidden = !targetUser.leaderboardHidden;
+    const { error } = await supabase.rpc('admin_set_leaderboard_visibility', {
+      p_user_id: targetUser.id,
+      p_hidden: hidden
+    });
+    if (error) {
+      console.error('Could not update leaderboard visibility:', error);
+      showToast(error.message.includes('Admin role required')
+        ? "Bu amal uchun Supabase admin roli talab qilinadi."
+        : "Reytingdagi ko'rinishni yangilab bo'lmadi.", 'error');
+      return;
+    }
+
+    setUsers(previousUsers => previousUsers.map(user => user.id === targetUser.id
+      ? { ...user, leaderboardHidden: hidden }
+      : user));
+    setRegisteredProfile(previousProfile => previousProfile?.id === targetUser.id
+      ? { ...previousProfile, leaderboardHidden: hidden }
+      : previousProfile);
+    setAuditLogs(previousLogs => [{
+      id: `L-${Date.now()}`,
+      admin: 'Admin',
+      action: `${targetUser.name} reytingdan ${hidden ? 'yashirildi' : 'qayta ko‘rsatildi'}`,
+      time: 'Hozirgina'
+    }, ...previousLogs]);
+    showToast(`${targetUser.name} ${hidden ? 'reytingdan yashirildi' : 'reytingda qayta ko‘rsatiladi'}.`);
   };
 
 
@@ -605,11 +640,10 @@ export default function App() {
   const isCurrentlyBanned = currentUser.bannedUntil
     ? Number(currentUser.bannedUntil) > Date.now()
     : Boolean(currentUser.ban);
-  const sortedUsersByXP = users
-    .filter(user => user.id !== currentUser.id)
-    .concat(currentUser)
-    .sort((a, b) => b.xp - a.xp);
-  const leaderboardUsers = [...sortedUsersByXP, ADMIN_PROFILE];
+  const leaderboardUsers = [
+    ...users.filter(user => !user.leaderboardHidden && user.id !== currentUser.id),
+    ...(currentUser.leaderboardHidden ? [] : [currentUser])
+  ].sort((a, b) => b.xp - a.xp).concat(ADMIN_PROFILE);
 
   const userLevel = getUserLevelInfo(currentUser.xp, currentUser.proMonths);
 
@@ -1835,9 +1869,9 @@ export default function App() {
                 {users.map(u => {
 
                   const lvl = getUserLevelInfo(u.xp, u.proMonths);
-                  const subscriptionActive = u.subscriptionUntil
+                  const subscriptionActive = u.subscriptionPermanent || (u.subscriptionUntil
                     ? Number(u.subscriptionUntil) > Date.now()
-                    : Boolean(u.isPro);
+                    : Boolean(u.isPro));
                   const banActive = u.bannedUntil
                     ? Number(u.bannedUntil) > Date.now()
                     : Boolean(u.ban);
@@ -1865,7 +1899,7 @@ export default function App() {
                             </span>
 
                             {subscriptionActive && <span className="text-[10px] bg-[#C8A66A]/15 text-[#C8A66A] px-2 py-0.5 rounded">PRO OBUNA</span>}
-
+                            {u.leaderboardHidden && <span className="text-[10px] bg-violet-500/15 text-violet-200 px-2 py-0.5 rounded">REYTINGDAN YASHIRILGAN</span>}
                             {banActive && <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded">BAN</span>}
 
                           </div>
@@ -1922,6 +1956,17 @@ export default function App() {
                           className="text-xs rounded-lg border border-[#C8A66A]/30 bg-[#C8A66A]/10 px-3 py-2 font-medium text-[#C8A66A] transition hover:bg-[#C8A66A]/20">
                           Obuna berish
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setLeaderboardVisibility(u)}
+                          className={`text-xs rounded-lg border px-3 py-2 font-medium transition ${
+                            u.leaderboardHidden
+                              ? 'border-violet-300/30 bg-violet-400/10 text-violet-200 hover:bg-violet-400/20'
+                              : 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
+                          }`}
+                        >
+                          {u.leaderboardHidden ? 'Reytingga qaytarish' : 'Reytingdan yashirish'}
+                        </button>
 
                         <button
                           type="button"
@@ -1938,7 +1983,10 @@ export default function App() {
                             Ban ni bekor qilish
                           </button>
                         )}
-                        {subscriptionActive && u.subscriptionUntil && (
+                        {subscriptionActive && u.subscriptionPermanent && (
+                          <span className="self-center text-[10px] text-[#C8A66A]">Doimiy PRO</span>
+                        )}
+                        {subscriptionActive && !u.subscriptionPermanent && u.subscriptionUntil && (
                           <span className="self-center text-[10px] text-[#C8A66A]">
                             {formatLocalDateTime(u.subscriptionUntil)} gacha
                           </span>
@@ -4289,7 +4337,10 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                {currentUser.isPro && currentUser.subscriptionUntil && (
+                {currentUser.isPro && currentUser.subscriptionPermanent && (
+                  <p className="mt-1 text-[10px] text-[#C8A66A]">Doimiy PRO obuna</p>
+                )}
+                {currentUser.isPro && !currentUser.subscriptionPermanent && currentUser.subscriptionUntil && (
                   <p className="mt-1 text-[10px] text-[#C8A66A]">
                     {formatLocalDateTime(Number(currentUser.subscriptionUntil))} gacha
                   </p>
