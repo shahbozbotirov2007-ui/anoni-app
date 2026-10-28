@@ -286,7 +286,48 @@ const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 
 
 
-export default function App() {
+const TEST_MODE_ANNOUNCEMENT_END = new Date('2026-11-29T00:00:00+05:00').getTime();
+const TEST_MODE_ANNOUNCEMENT_ACTIVE = Date.now() < TEST_MODE_ANNOUNCEMENT_END;
+
+function TestModeAnnouncement() {
+  const [visible, setVisible] = useState(TEST_MODE_ANNOUNCEMENT_ACTIVE);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    const timeout = window.setTimeout(() => setVisible(false), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [visible]);
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="test-mode-announcement-title"
+        className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-amber-300/30 bg-gradient-to-br from-[#302315] via-[#1D1729] to-[#100D18] p-7 text-center shadow-[0_0_80px_rgba(251,191,36,0.2)] sm:p-12"
+      >
+        <div className="pointer-events-none absolute -right-12 -top-14 h-52 w-52 rounded-full bg-amber-400/15 blur-3xl" />
+        <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-300/30 bg-amber-400/10 text-amber-200">
+          <AlertTriangle size={32} />
+        </div>
+        <p className="relative mt-6 text-xs font-bold uppercase tracking-[0.3em] text-amber-200">ANONI APP E’LONI</p>
+        <h1 id="test-mode-announcement-title" className="relative mt-3 text-2xl font-black leading-tight text-white sm:text-4xl">
+          Biz hozir test rejimidamiz
+        </h1>
+        <p className="relative mx-auto mt-5 max-w-2xl text-base leading-relaxed text-amber-50/90 sm:text-xl">
+          Har kuni yangi funksiyalar qo‘shyapmiz. Shu sababli ba’zida uzilishlar va xatolar bo‘lishi mumkin. Buning uchun uzr so‘raymiz.
+        </p>
+        <p className="relative mt-7 text-sm font-bold tracking-wide text-amber-200 sm:text-base">
+          Hurmat bilan, ANONI APP jamoasi
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function AppContent() {
   const [registeredProfile, setRegisteredProfile] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
@@ -4888,4 +4929,13 @@ export default function App() {
 
   );
 
+}
+
+export default function App() {
+  return (
+    <>
+      <AppContent />
+      <TestModeAnnouncement />
+    </>
+  );
 }
