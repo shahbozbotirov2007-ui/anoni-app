@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import IQTest from './components/IQTest';
 
 import { 
 
@@ -11,7 +12,7 @@ import {
 
   ChevronRight, ArrowLeft, Send, Image as ImageIcon, RefreshCw, 
 
-  Award, Clock, CheckCircle2, HelpCircle, Sliders, Heart, Bird,
+  Award, Clock, CheckCircle2, HelpCircle, Sliders, Heart, Bird, Brain,
   Flame, Crown, Star, BadgeCheck, Copy
 
 } from 'lucide-react';
@@ -159,7 +160,7 @@ const mapProfileRow = row => ({
   subscriptionUntil: row.subscription_until ? Date.parse(row.subscription_until) : null,
   subscriptionPermanent: Boolean(row.subscription_permanent),
   bannedUntil: row.banned_until ? Date.parse(row.banned_until) : null,
-  isPro: Boolean(row.subscription_permanent || (row.subscription_until && Date.parse(row.subscription_until) > Date.now())),
+  isPro: Boolean(row.is_pro || row.subscription_permanent || (row.subscription_until && Date.parse(row.subscription_until) > Date.now())),
   leaderboardHidden: Boolean(row.leaderboard_hidden),
   ownedItems: row.owned_items || [],
   testsCreatedToday: row.tests_created_date === getUTCDateKey() ? row.tests_created_count : 0,
@@ -180,13 +181,21 @@ const mapProfileRow = row => ({
 });
 
 const fetchProfiles = async () => {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .order('xp', { ascending: false })
-    .order('created_at', { ascending: true });
+  const { data, error } = await supabase.rpc('get_profiles_for_app');
   if (error) throw error;
-  return data.map(mapProfileRow);
+  if (!data?.own_profile || !Array.isArray(data.public_profiles) || !Array.isArray(data.admin_profiles)) {
+    throw new Error('Supabase get_profiles_for_app returned an incomplete profile response.');
+  }
+
+  const profileRows = new Map(
+    (data.public_profiles || []).map(profile => [profile.user_id, profile])
+  );
+  if (data.own_profile) profileRows.set(data.own_profile.user_id, data.own_profile);
+  for (const profile of data.admin_profiles || []) {
+    profileRows.set(profile.user_id, profile);
+  }
+
+  return Array.from(profileRows.values()).map(mapProfileRow);
 };
 
 const ADMIN_PROFILE = {
@@ -303,9 +312,24 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState('bosh_sahifa');
 
-  const [subView, setSubView] = useState(null); // 'create_test', 'solve_test', 'test_details', 'shop', 'pro', 'support'
+  const [subView, setSubView] = useState(() => new URLSearchParams(window.location.search).has('iq-battle') ? 'iq-test' : null);
 
   const [isAdminMode, setIsAdminMode] = useState(false);
+
+  const openIQTest = () => {
+    if (!new URLSearchParams(window.location.search).has('iq-battle')) {
+      window.history.pushState({ anoniIQTest: true }, '', `${window.location.pathname}${window.location.search}#iq-test`);
+    }
+    setSubView('iq-test');
+  };
+
+  useEffect(() => {
+    const handleIQTestPopState = () => {
+      if (subView === 'iq-test') setSubView(null);
+    };
+    window.addEventListener('popstate', handleIQTestPopState);
+    return () => window.removeEventListener('popstate', handleIQTestPopState);
+  }, [subView]);
 
   const [adminTab, setAdminTab] = useState('dashboard');
 
@@ -673,8 +697,12 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
         void refreshProfiles();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profile_leaderboard' }, () => {
+        void refreshProfiles();
+      })
       .subscribe(status => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('Supabase profile/leaderboard realtime subscription failed:', status);
           showToast("Reytingning real vaqt ulanishi uzildi.", 'error');
         }
       });
@@ -814,7 +842,11 @@ export default function App() {
         }));
       }
     } else if (reason === 'Kunlik Challenge bajarildi') {
-      const result = await supabase.rpc('claim_challenge_reward', { p_challenge_id: activityReference });
+      const [challengeId, choice] = String(activityReference || '').split(':');
+      const result = await supabase.rpc('submit_daily_challenge_vote', {
+        p_challenge_id: challengeId,
+        p_choice: choice
+      });
       error = result.error;
     } else {
       error = new Error('This balance change is not backed by a permitted server action.');
@@ -3964,6 +3996,20 @@ export default function App() {
 
           )}
 
+          {subView === 'iq-test' && (
+            <IQTest
+              supabase={supabase}
+              userId={registeredProfile.id}
+              inviteCode={new URLSearchParams(window.location.search).get('iq-battle') || ''}
+              onBack={() => {
+                if (window.history.state?.anoniIQTest) {
+                  window.history.back();
+                } else {
+                  setSubView(null);
+                }
+              }}
+            />
+          )}
 
 
           {/* =================================================================
@@ -4060,6 +4106,23 @@ export default function App() {
               {/* Main 3 Feature Cards */}
 
               <div className="space-y-3">
+
+                <button
+                  type="button"
+                  onClick={openIQTest}
+                  className="group w-full rounded-2xl border border-violet-300/25 bg-gradient-to-r from-violet-500/20 via-[#1D1729] to-fuchsia-500/10 p-5 text-left transition-all hover:-translate-y-0.5 hover:border-violet-300/50"
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-3">
+                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/20 text-violet-200"><Brain size={23} /></span>
+                      <span>
+                        <span className="block font-black text-white">🧠 IQ TEST</span>
+                        <span className="mt-1 block text-xs text-[#A7A0B5]">Mantiqingizni sinang yoki do‘stingiz bilan bellashing</span>
+                      </span>
+                    </span>
+                    <ChevronRight className="shrink-0 text-violet-200 transition group-hover:translate-x-1" />
+                  </span>
+                </button>
 
                 <div 
 
@@ -4508,7 +4571,7 @@ export default function App() {
                           disabled={done}
 
                           onClick={async () => {
-                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, ch.id);
+                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, `${ch.id}:A`);
                             if (!rewarded) return;
                             setChallenges(prev => prev.map(item => item.id === ch.id ? { ...item, votesA: item.votesA + 1, completedBy: [...item.completedBy, currentUser.id] } : item));
                             showToast('Tanlovingiz qabul qilindi! +15 XP va +8 Coin!');
@@ -4534,7 +4597,7 @@ export default function App() {
                           disabled={done}
 
                           onClick={async () => {
-                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, ch.id);
+                            const rewarded = await updateUserBalance(currentUser.id, settings.xpChallenge, settings.coinChallenge, `Kunlik Challenge bajarildi`, false, `${ch.id}:B`);
                             if (!rewarded) return;
                             setChallenges(prev => prev.map(item => item.id === ch.id ? { ...item, votesB: item.votesB + 1, completedBy: [...item.completedBy, currentUser.id] } : item));
                             showToast('Tanlovingiz qabul qilindi! +15 XP va +8 Coin!');
@@ -4788,7 +4851,20 @@ export default function App() {
 
                   key={tab.id}
 
-                  onClick={() => { setSubView(null); setActiveTab(tab.id); }}
+                  onClick={() => {
+                    if (subView === 'iq-test') {
+                      if (window.history.state?.anoniIQTest) {
+                        window.history.back();
+                      } else {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('iq-battle');
+                        url.hash = '';
+                        window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+                      }
+                    }
+                    setSubView(null);
+                    setActiveTab(tab.id);
+                  }}
 
                   className={`flex flex-col items-center justify-center w-full h-full gap-1 transition-colors ${active ? 'text-[#8B5CF6]' : 'text-[#A7A0B5] hover:text-white'}`}>
 

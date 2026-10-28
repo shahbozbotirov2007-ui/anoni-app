@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@keyframes iq-score-fill {
+  from { stroke-dasharray: 0 427; }
+  to { stroke-dasharray: var(--iq-score-dash); }
+}
+
+@keyframes iq-question-enter {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.iq-score-ring {
+  animation: iq-score-fill 1.2s ease-out forwards;
+}
+
+.iq-question-card {
+  animation: iq-question-enter 280ms ease-out both;
+}
