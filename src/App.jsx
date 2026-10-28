@@ -23,8 +23,11 @@ import {
 const callGeminiAPI = async (prompt, systemInstruction = "", jsonSchema = null) => {
 
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Gemini API kaliti sozlanmagan. Vercel'da VITE_GEMINI_API_KEY qiymatini qo'shib, qayta deploy qiling.");
+  }
 
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   
 
@@ -58,38 +61,40 @@ const callGeminiAPI = async (prompt, systemInstruction = "", jsonSchema = null) 
 
 
 
+  let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
-
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
     try {
-
       const response = await fetch(apiUrl, {
-
         method: 'POST',
-
         headers: { 'Content-Type': 'application/json' },
-
-        body: JSON.stringify(payload)
-
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
-
-      if (!response.ok) throw new Error('API Error');
-
       const result = await response.json();
-
+      if (!response.ok) {
+        const apiError = new Error(result.error?.message || `Gemini API so'rovi rad etildi (${response.status}).`);
+        apiError.status = response.status;
+        throw apiError;
+      }
       const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
       if (text) return text;
-
+      const blockReason = result.promptFeedback?.blockReason;
+      throw new Error(blockReason
+        ? `Gemini so'rovni xavfsizlik sababi bilan blokladi (${blockReason}).`
+        : "Gemini javob qaytarmadi. Savolni boshqacha yozib ko'ring.");
     } catch (e) {
-
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
-
+      lastError = e;
+      const retryable = !e.status || e.status === 429 || e.status >= 500;
+      if (!retryable || attempt === 2) throw e;
+      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+    } finally {
+      window.clearTimeout(timeout);
     }
-
   }
 
-  return null;
-
+  throw lastError || new Error("Gemini API so'rovi bajarilmadi.");
 };
 
 
@@ -964,27 +969,7 @@ export default function App() {
 
   // --- Support & AI Chat State ---
 
-  const [tickets, setTickets] = useState([
-
-    {
-
-      id: 'TIC-1',
-
-      userId: 'AN-1001',
-
-      userName: 'Foydalanuvchi',
-
-      status: 'open',
-
-      messages: [
-
-        { sender: 'ai', text: 'Assalomu alaykum! ANONI AI Support xizmatiga xush kelibsiz. Sizga qanday yordam bera olaman?', time: '10:00' }
-
-      ]
-
-    }
-
-  ]);
+  const [tickets, setTickets] = useState([]);
 
   const [supportInput, setSupportInput] = useState('');
 
@@ -1190,8 +1175,15 @@ export default function App() {
 
 
 
-    const resText = await callGeminiAPI(prompt, "Sen qiziqarli psixologik va do'stlik testlari tuzuvchi mutaxassissan.", schema);
-
+    let resText;
+    try {
+      resText = await callGeminiAPI(prompt, "Sen qiziqarli psixologik va do'stlik testlari tuzuvchi mutaxassissan.", schema);
+    } catch (error) {
+      console.error('Could not generate AI test questions:', error);
+      showToast(error.message || "AI savollarini yaratib bo'lmadi.", 'error');
+      setAiLoading(false);
+      return;
+    }
     setAiLoading(false);
 
 
@@ -1453,49 +1445,52 @@ export default function App() {
 
   const handleSendSupportMessage = async () => {
 
-    if (!supportInput.trim()) return;
+    if (aiSupportTyping || !supportInput.trim()) return;
 
     const userMsg = supportInput.trim();
-
     setSupportInput('');
 
-
-
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const ticketId = `TIC-${currentUser.id}`;
+    setTickets(previousTickets => {
+      const currentTicket = previousTickets.find(ticket => ticket.userId === currentUser.id);
+      if (currentTicket) {
+        return previousTickets.map(ticket => ticket.userId === currentUser.id
+          ? { ...ticket, messages: [...ticket.messages, { sender: 'user', text: userMsg, time: now }] }
+          : ticket);
+      }
 
-    setTickets(prev => prev.map(t => {
-
-      if (t.userId !== currentUser.id) return t;
-
-      return { ...t, messages: [...t.messages, { sender: 'user', text: userMsg, time: now }] };
-
-    }));
-
-
+      return [...previousTickets, {
+        id: ticketId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        status: 'open',
+        messages: [
+          { sender: 'ai', text: 'Assalomu alaykum! ANONI AI Support xizmatiga xush kelibsiz. Sizga qanday yordam bera olaman?', time: now },
+          { sender: 'user', text: userMsg, time: now }
+        ]
+      }];
+    });
 
     setAiSupportTyping(true);
-
-    const aiReply = await callGeminiAPI(
-
-      `Foydalanuvchi (${currentUser.name}, Daraja: ${userLevel.level}, Coin: ${currentUser.coins}, PRO: ${currentUser.isPro ? 'Bor' : 'Yo\'q'}) savoli: "${userMsg}"`,
-
-      settings.aiSystemPrompt
-
-    );
-
-    setAiSupportTyping(false);
-
-
-
-    const finalReply = aiReply || "Murojaatingiz qabul qilindi! Tez orada ANONI moderatorlari yoki tizim sizga batafsil ma'lumot beradi.";
-
-    setTickets(prev => prev.map(t => {
-
-      if (t.userId !== currentUser.id) return t;
-
-      return { ...t, messages: [...t.messages, { sender: 'ai', text: finalReply, time: now }] };
-
-    }));
+    try {
+      const aiReply = await callGeminiAPI(
+        `Foydalanuvchi (${currentUser.name}, Daraja: ${userLevel.level}, Coin: ${currentUser.coins}, PRO: ${currentUser.isPro ? 'Bor' : 'Yo\'q'}) savoli: "${userMsg}"`,
+        settings.aiSystemPrompt
+      );
+      setTickets(previousTickets => previousTickets.map(ticket => ticket.userId === currentUser.id
+        ? { ...ticket, messages: [...ticket.messages, { sender: 'ai', text: aiReply, time: now }] }
+        : ticket));
+    } catch (error) {
+      console.error('AI Support request failed:', error);
+      const errorMessage = error.message || "AI Support hozir javob bera olmadi. Keyinroq qayta urinib ko'ring.";
+      setTickets(previousTickets => previousTickets.map(ticket => ticket.userId === currentUser.id
+        ? { ...ticket, messages: [...ticket.messages, { sender: 'ai', text: errorMessage, time: now }] }
+        : ticket));
+      showToast(errorMessage, 'error');
+    } finally {
+      setAiSupportTyping(false);
+    }
 
   };
 
@@ -2298,16 +2293,19 @@ export default function App() {
                         propertyOrdering: ["question", "optionA", "optionB"]
 
                       };
-
-                      const res = await callGeminiAPI(
-
-                        `"${aiChallengePrompt}" mavzusida "Buni tanlaysanmi yoki bunimi?" uslubida qiziqarli challenge savol va ikkita javob varianti (emoji bilan) o'zbek tilida tuz.`,
-
-                        "Sen yoshlar uchun qiziqarli interaktiv o'yinlar tuzuvchisan.",
-
-                        schema
-
-                      );
+                      let res;
+                      try {
+                        res = await callGeminiAPI(
+                          `"${aiChallengePrompt}" mavzusida "Buni tanlaysanmi yoki bunimi?" uslubida qiziqarli challenge savol va ikkita javob varianti (emoji bilan) o'zbek tilida tuz.`,
+                          "Sen yoshlar uchun qiziqarli interaktiv o'yinlar tuzuvchisan.",
+                          schema
+                        );
+                      } catch (error) {
+                        console.error('Could not generate an AI challenge:', error);
+                        showToast(error.message || "AI challenge yaratib bo'lmadi.", 'error');
+                        setAiChallengeLoading(false);
+                        return;
+                      }
 
                       setAiChallengeLoading(false);
 
@@ -3781,7 +3779,7 @@ export default function App() {
 
                 </button>
 
-                <span className="text-xs bg-[#22C55E]/20 text-[#22C55E] px-2.5 py-0.5 rounded-full font-semibold">AI Support Online</span>
+                <span className="text-xs bg-[#22C55E]/20 text-[#22C55E] px-2.5 py-0.5 rounded-full font-semibold">Gemini AI Support</span>
 
               </div>
 
@@ -3824,13 +3822,10 @@ export default function App() {
                     type="text"
 
                     value={supportInput}
-
                     onChange={(e) => setSupportInput(e.target.value)}
-
                     onKeyDown={(e) => e.key === 'Enter' && handleSendSupportMessage()}
-
-                    placeholder="Savolingizni yozing..."
-
+                    disabled={aiSupportTyping}
+                    placeholder={aiSupportTyping ? 'AI javob bermoqda...' : 'Savolingizni yozing...'}
                     className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-[#8B5CF6]"
 
                   />
@@ -3838,8 +3833,9 @@ export default function App() {
                   <button 
 
                     onClick={handleSendSupportMessage}
-
-                    className="bg-[#8B5CF6] px-4 rounded-xl flex items-center justify-center">
+                    disabled={aiSupportTyping || !supportInput.trim()}
+                    aria-label="Xabarni yuborish"
+                    className="bg-[#8B5CF6] px-4 rounded-xl flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50">
 
                     <Send size={16} />
 
