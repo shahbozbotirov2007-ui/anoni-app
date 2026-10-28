@@ -19,7 +19,7 @@ ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account
 
    Use a unique, strong password. The app’s login screen includes **Admin hisobim bilan kirish**. TOTP/MFA challenge enforcement is not implemented in the app yet, so do not treat enabling an MFA factor alone as protecting admin actions. Never use a nickname/age combination or client-side flag as administrator credentials; admin database actions independently verify the server-managed role.
 
-The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. The test-creation pause migration disables new tests until 2026-11-03 18:00 Uzbekistan time while leaving existing tests available. Profile reads require an authenticated user.
+The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. The test-creation pause migration disables new tests until 2026-11-03 18:00 Uzbekistan time while leaving existing tests available. The admin delete-account migration adds a guarded, irreversible user deletion action; it cannot delete the currently signed-in admin. Profile reads require an authenticated user.
 
 ## Current data boundaries
 

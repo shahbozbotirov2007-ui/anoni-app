@@ -313,6 +313,9 @@ export default function App() {
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
   const [accountActionModal, setAccountActionModal] = useState(null);
   const [accountActionBusy, setAccountActionBusy] = useState(false);
+  const [deleteUserModal, setDeleteUserModal] = useState(null);
+  const [deleteUserConfirmation, setDeleteUserConfirmation] = useState('');
+  const [deleteUserBusy, setDeleteUserBusy] = useState(false);
   const [testShareModal, setTestShareModal] = useState(null);
   const [testCreationStatus, setTestCreationStatus] = useState({ profileId: null, pausedUntil: null, error: false });
   const [clockNow, setClockNow] = useState(0);
@@ -463,6 +466,48 @@ export default function App() {
       showToast(`Hisob holatini yangilab bo'lmadi: ${error.message}`, 'error');
     } finally {
       setAccountActionBusy(false);
+    }
+  };
+
+  const deleteUserAccount = async () => {
+    if (!deleteUserModal || deleteUserBusy) return;
+    if (deleteUserModal.id === currentUserId) {
+      showToast("Admin o'z akkauntini bu panel orqali o'chira olmaydi.", 'error');
+      return;
+    }
+    if (deleteUserConfirmation !== deleteUserModal.publicId) {
+      showToast("Tasdiqlash uchun foydalanuvchining ID raqamini aynan kiriting.", 'error');
+      return;
+    }
+
+    setDeleteUserBusy(true);
+    try {
+      const { error } = await supabase.rpc('admin_delete_user_account', {
+        p_user_id: deleteUserModal.id
+      });
+      if (error) {
+        console.error('Could not delete user account:', error);
+        showToast(error.message.includes('Admin role required')
+          ? "Bu amal uchun Supabase admin roli talab qilinadi."
+          : `Akkauntni o'chirib bo'lmadi: ${error.message}`, 'error');
+        return;
+      }
+
+      setUsers(previousUsers => previousUsers.filter(user => user.id !== deleteUserModal.id));
+      setAuditLogs(previousLogs => [{
+        id: `L-${Date.now()}`,
+        admin: 'Admin',
+        action: `${deleteUserModal.name} (${deleteUserModal.publicId}) akkaunti butunlay o‘chirildi`,
+        time: 'Hozirgina'
+      }, ...previousLogs]);
+      setDeleteUserModal(null);
+      setDeleteUserConfirmation('');
+      showToast(`${deleteUserModal.name} akkaunti butunlay o'chirildi.`);
+    } catch (error) {
+      console.error('Could not delete user account:', error);
+      showToast(`Akkauntni o'chirib bo'lmadi: ${error.message}`, 'error');
+    } finally {
+      setDeleteUserBusy(false);
     }
   };
 
@@ -2153,6 +2198,18 @@ export default function App() {
                             {formatLocalDateTime(u.bannedUntil)} gacha
                           </span>
                         )}
+                        {u.id !== currentUserId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteUserConfirmation('');
+                              setDeleteUserModal({ id: u.id, name: u.name, publicId: u.publicId });
+                            }}
+                            className="text-xs rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 font-medium text-red-200 transition hover:bg-red-500/20"
+                          >
+                            <span className="inline-flex items-center gap-1.5"><Trash2 size={13} /> Butunlay o‘chirish</span>
+                          </button>
+                        )}
 
                       </div>
 
@@ -2667,6 +2724,64 @@ export default function App() {
                       Ban ni bekor qilish
                     </button>
                   )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {deleteUserModal && (
+            <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-user-title"
+                className="w-full max-w-md rounded-3xl border border-red-400/30 bg-gradient-to-br from-[#2A1118] via-[#171323] to-[#100D18] p-6 shadow-[0_0_50px_rgba(239,68,68,0.18)]"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-300">
+                    <Trash2 size={19} />
+                  </span>
+                  <div>
+                    <h2 id="delete-user-title" className="text-lg font-extrabold text-red-100">Akkauntni butunlay o‘chirish</h2>
+                    <p className="mt-1 text-sm font-semibold text-white">{deleteUserModal.name} · ID: {deleteUserModal.publicId}</p>
+                  </div>
+                </div>
+                <p className="mt-4 rounded-xl border border-red-400/20 bg-red-500/5 p-3 text-xs leading-relaxed text-red-100/90">
+                  Bu amalni qaytarib bo‘lmaydi. Foydalanuvchining Supabase akkaunti, profili, XP, Coin, PRO/ban holati va profilga bog‘liq mukofot qaydlari o‘chiriladi.
+                </p>
+                <label htmlFor="delete-user-confirmation" className="mt-4 block text-xs font-semibold text-slate-300">
+                  Tasdiqlash uchun ID raqamini kiriting: {deleteUserModal.publicId}
+                </label>
+                <input
+                  id="delete-user-confirmation"
+                  type="text"
+                  autoComplete="off"
+                  value={deleteUserConfirmation}
+                  onChange={event => setDeleteUserConfirmation(event.target.value)}
+                  disabled={deleteUserBusy}
+                  className="mt-2 w-full rounded-xl border border-red-400/20 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-red-400 disabled:opacity-50"
+                />
+                <div className="mt-5 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteUserModal(null);
+                      setDeleteUserConfirmation('');
+                    }}
+                    disabled={deleteUserBusy}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deleteUserAccount}
+                    disabled={deleteUserBusy || deleteUserConfirmation !== deleteUserModal.publicId}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 size={15} />
+                    {deleteUserBusy ? 'O‘chirilmoqda...' : 'Butunlay o‘chirish'}
+                  </button>
                 </div>
               </section>
             </div>
