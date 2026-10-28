@@ -9,7 +9,15 @@ ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account
 3. In **Authentication → Sign In / Providers**, enable **Anonymous Sign-Ins**. Participants then enter only a nickname and age; they do not need email or password.
 4. For local development, copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is intended for browser use; never put a Supabase secret/service-role key in a `VITE_` variable.
 5. Add the same two `VITE_SUPABASE_*` variables in the Vercel project’s environment settings for Preview and Production, then redeploy.
-6. To grant administrator access, set `app_metadata.role` to `admin` for the account using a trusted Supabase administrative tool. Do not use editable user metadata or a client-side flag for authorization. Admin database actions independently verify this role.
+6. For a recoverable admin login across devices, create a dedicated email/password user in **Authentication → Users**, then grant its email `app_metadata.role = admin` using the trusted SQL Editor:
+
+   ```sql
+   update auth.users
+   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+   where lower(email) = lower('your-admin-email@example.com');
+   ```
+
+   Use a unique, strong password. The app’s login screen includes **Admin hisobim bilan kirish**. TOTP/MFA challenge enforcement is not implemented in the app yet, so do not treat enabling an MFA factor alone as protecting admin actions. Never use a nickname/age combination or client-side flag as administrator credentials; admin database actions independently verify the server-managed role.
 
 The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. The test-creation pause migration disables new tests until 2026-11-03 18:00 Uzbekistan time while leaving existing tests available. Profile reads require an authenticated user.
 

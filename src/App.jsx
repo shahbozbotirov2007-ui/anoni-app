@@ -281,6 +281,9 @@ export default function App() {
   const [isAvatarDragOver, setIsAvatarDragOver] = useState(false);
   const [registrationName, setRegistrationName] = useState('');
   const [registrationAge, setRegistrationAge] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminLoginMode, setAdminLoginMode] = useState(false);
   const [registrationTermsAccepted, setRegistrationTermsAccepted] = useState(false);
   const [registrationError, setRegistrationError] = useState('');
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -1539,6 +1542,31 @@ export default function App() {
     }
   };
 
+  const handleAdminSignIn = async event => {
+    event.preventDefault();
+    if (authBusy) return;
+
+    setAuthBusy(true);
+    setRegistrationError('');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: adminEmail.trim(),
+        password: adminPassword
+      });
+      if (error) throw error;
+      if (data.user?.app_metadata?.role !== 'admin') {
+        await supabase.auth.signOut();
+        throw new Error("Bu hisobga admin huquqi berilmagan. Supabase sozlamalarini tekshiring.");
+      }
+      setAdminPassword('');
+    } catch (error) {
+      console.error('Admin account sign-in failed:', error);
+      setRegistrationError(error.message || "Admin hisobiga kirib bo'lmadi. Email va parolni tekshiring.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const saveAvatarFile = (file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
@@ -1618,67 +1646,101 @@ export default function App() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#0B0912] px-5 py-8 text-white">
         <form
-          onSubmit={handleRegistrationSubmit}
+          onSubmit={adminLoginMode ? handleAdminSignIn : handleRegistrationSubmit}
           className="relative w-full max-w-md overflow-hidden rounded-3xl border border-violet-300/20 bg-gradient-to-br from-[#211832] via-[#15111F] to-[#100D18] p-6 shadow-[0_0_60px_rgba(139,92,246,0.2)] sm:p-8"
         >
           <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-violet-500/15 blur-3xl" />
           <div className="relative">
             <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/15 text-xl font-black tracking-widest text-violet-200 ring-1 ring-violet-300/25">
-              A
+              {adminLoginMode ? <Shield size={24} /> : 'A'}
             </div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-violet-300">ANONI</p>
-            <h1 className="mt-2 text-2xl font-extrabold">ANONI’ga kirish</h1>
+            <h1 className="mt-2 text-2xl font-extrabold">{adminLoginMode ? 'Admin hisobiga kirish' : 'ANONI’ga kirish'}</h1>
             <p className="mt-2 text-sm leading-relaxed text-[#A7A0B5]">
-              Faqat nick va yoshingizni kiriting. Email va parol kerak emas.
+              {adminLoginMode
+                ? 'Admin hisobingiz uchun email va parolni kiriting. Nick va yosh admin huquqini bermaydi.'
+                : 'Faqat nick va yoshingizni kiriting. Email va parol kerak emas.'}
             </p>
 
-            <label htmlFor="registration-name" className="mt-6 block text-xs font-semibold text-slate-300">Nick</label>
-            <input
-              id="registration-name"
-              autoComplete="nickname"
-              maxLength={50}
-              required
-              value={registrationName}
-              onChange={event => setRegistrationName(event.target.value)}
-              placeholder="Saytdagi ismingiz"
-              className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
-            />
+            {adminLoginMode ? (
+              <>
+                <label htmlFor="admin-email" className="mt-6 block text-xs font-semibold text-slate-300">Admin email</label>
+                <input
+                  id="admin-email"
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={adminEmail}
+                  onChange={event => setAdminEmail(event.target.value)}
+                  placeholder="Email manzilingiz"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
+                <label htmlFor="admin-password" className="mt-4 block text-xs font-semibold text-slate-300">Parol</label>
+                <input
+                  id="admin-password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={adminPassword}
+                  onChange={event => setAdminPassword(event.target.value)}
+                  placeholder="Admin paroli"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
+                <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                  Faqat Supabase’da admin roli berilgan hisob kirishi mumkin.
+                </p>
+              </>
+            ) : (
+              <>
+                <label htmlFor="registration-name" className="mt-6 block text-xs font-semibold text-slate-300">Nick</label>
+                <input
+                  id="registration-name"
+                  autoComplete="nickname"
+                  maxLength={50}
+                  required
+                  value={registrationName}
+                  onChange={event => setRegistrationName(event.target.value)}
+                  placeholder="Saytdagi ismingiz"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
 
-            <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
-            <input
-              id="registration-age"
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max="120"
-              step="1"
-              required
-              value={registrationAge}
-              onChange={event => setRegistrationAge(event.target.value)}
-              placeholder="Yoshingiz"
-              className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
-            />
+                <label htmlFor="registration-age" className="mt-4 block text-xs font-semibold text-slate-300">Yosh</label>
+                <input
+                  id="registration-age"
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="120"
+                  step="1"
+                  required
+                  value={registrationAge}
+                  onChange={event => setRegistrationAge(event.target.value)}
+                  placeholder="Yoshingiz"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400"
+                />
 
-            <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
-              <input
-                id="registration-terms"
-                type="checkbox"
-                required
-                checked={registrationTermsAccepted}
-                onChange={event => {
-                  setRegistrationTermsAccepted(event.target.checked);
-                  if (event.target.checked) setRegistrationError('');
-                }}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
-              />
-              <span className="text-sm leading-relaxed text-yellow-500">
-                Qoidalarga roziman. Profilim shu brauzer va qurilmada saqlanishini, boshqa qurilmada nickni yozish avvalgi profilimni tiklamasligini tushunaman.
-              </span>
-            </label>
+                <label htmlFor="registration-terms" className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3">
+                  <input
+                    id="registration-terms"
+                    type="checkbox"
+                    required
+                    checked={registrationTermsAccepted}
+                    onChange={event => {
+                      setRegistrationTermsAccepted(event.target.checked);
+                      if (event.target.checked) setRegistrationError('');
+                    }}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400 focus:ring-2 focus:ring-amber-300"
+                  />
+                  <span className="text-sm leading-relaxed text-yellow-500">
+                    Qoidalarga roziman. Profilim shu brauzer va qurilmada saqlanishini, boshqa qurilmada nickni yozish avvalgi profilimni tiklamasligini tushunaman.
+                  </span>
+                </label>
 
-            <p className="mt-3 text-xs leading-relaxed text-slate-400">
-              Eslatma: boshqa telefonda kirsangiz, u yerda alohida profil yaratiladi.
-            </p>
+                <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                  Eslatma: boshqa telefonda kirsangiz, u yerda alohida profil yaratiladi.
+                </p>
+              </>
+            )}
 
             {registrationError && (
               <p role="alert" className="mt-3 rounded-xl border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -1688,10 +1750,20 @@ export default function App() {
 
             <button
               type="submit"
-              disabled={authBusy || !registrationTermsAccepted}
+              disabled={authBusy || (!adminLoginMode && !registrationTermsAccepted)}
               className="mt-6 w-full rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
             >
-              {authBusy ? '⏳ Kutilmoqda...' : '🚀 Boshlash'}
+              {authBusy ? '⏳ Kutilmoqda...' : adminLoginMode ? '🔐 Admin sifatida kirish' : '🚀 Boshlash'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminLoginMode(previous => !previous);
+                setRegistrationError('');
+              }}
+              className="mt-4 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10"
+            >
+              {adminLoginMode ? 'Oddiy foydalanuvchi kirishiga qaytish' : 'Admin hisobim bilan kirish'}
             </button>
           </div>
         </form>
