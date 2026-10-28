@@ -27,7 +27,7 @@ const callGeminiAPI = async (prompt, systemInstruction = "", jsonSchema = null) 
     throw new Error("Gemini API kaliti sozlanmagan. Vercel'da VITE_GEMINI_API_KEY qiymatini qo'shib, qayta deploy qiling.");
   }
 
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
 
   
 
