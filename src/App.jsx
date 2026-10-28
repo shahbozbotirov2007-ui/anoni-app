@@ -291,10 +291,11 @@ const TEST_MODE_ANNOUNCEMENT_ACTIVE = Date.now() < TEST_MODE_ANNOUNCEMENT_END;
 
 function TestModeAnnouncement() {
   const [visible, setVisible] = useState(TEST_MODE_ANNOUNCEMENT_ACTIVE);
+  const [canDismiss, setCanDismiss] = useState(false);
 
   useEffect(() => {
     if (!visible) return undefined;
-    const timeout = window.setTimeout(() => setVisible(false), 5000);
+    const timeout = window.setTimeout(() => setCanDismiss(true), 5000);
     return () => window.clearTimeout(timeout);
   }, [visible]);
 
@@ -322,6 +323,15 @@ function TestModeAnnouncement() {
         <p className="relative mt-7 text-sm font-bold tracking-wide text-amber-200 sm:text-base">
           Hurmat bilan, ANONI APP jamoasi
         </p>
+        {canDismiss && (
+          <button
+            type="button"
+            onClick={() => setVisible(false)}
+            className="relative mt-8 min-w-48 rounded-xl bg-amber-300 px-8 py-3.5 text-sm font-extrabold text-[#21170B] shadow-lg shadow-amber-500/20 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-amber-100 focus:ring-offset-2 focus:ring-offset-[#1D1729]"
+          >
+            Tushunarli
+          </button>
+        )}
       </section>
     </div>
   );
