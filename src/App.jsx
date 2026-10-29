@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import IQTest from './components/IQTest';
+import Detective from './components/Detective';
 
 import { 
 
@@ -12,7 +13,7 @@ import {
 
   ChevronRight, ArrowLeft, Send, Image as ImageIcon, RefreshCw, 
 
-  Award, Clock, CheckCircle2, HelpCircle, Sliders, Heart, Bird, Brain,
+  Award, Clock, CheckCircle2, HelpCircle, Sliders, Heart, Bird, Brain, Fingerprint,
   Flame, Crown, Star, BadgeCheck, Copy
 
 } from 'lucide-react';
@@ -157,6 +158,7 @@ const mapProfileRow = row => ({
   age: row.age,
   xp: row.xp,
   coins: row.coins,
+  gold: row.gold || 0,
   subscriptionUntil: row.subscription_until ? Date.parse(row.subscription_until) : null,
   subscriptionPermanent: Boolean(row.subscription_permanent),
   bannedUntil: row.banned_until ? Date.parse(row.banned_until) : null,
@@ -842,6 +844,7 @@ function AppContent() {
     name: registeredProfile?.name || 'Foydalanuvchi',
     xp: 0,
     coins: 0,
+    gold: 0,
     isPro: false,
     proMonths: 0,
     subscriptionUntil: registeredProfile?.subscriptionUntil ?? null,
@@ -2041,7 +2044,7 @@ function AppContent() {
                 { id: 'users', label: 'Foydalanuvchilar', icon: Users },
 
                 { id: 'tests', label: 'Testlar nazorati', icon: FileText },
-
+                { id: 'detective', label: 'DETEKTIV', icon: Fingerprint },
                 { id: 'challenges', label: 'AI Challenge', icon: Zap },
 
                 { id: 'ads', label: 'Reklama (9:16)', icon: ImageIcon },
@@ -2240,7 +2243,7 @@ function AppContent() {
 
                           <div className="text-xs text-[#A7A0B5] mt-1">
 
-                            XP: <strong className="text-white">{u.xp}</strong> | ANONI COIN: <strong className="text-[#FBBF24]">{u.coins}</strong>
+                            XP: <strong className="text-white">{u.xp}</strong> | ANONI COIN: <strong className="text-[#FBBF24]">{u.coins}</strong> | GOLD: <strong className="text-amber-200">{u.gold || 0}</strong>
 
                           </div>
 
@@ -2803,6 +2806,10 @@ function AppContent() {
 
           )}
 
+          {adminTab === 'detective' && (
+            <Detective supabase={supabase} isAdmin />
+          )}
+
           {accountActionModal && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
               <section
@@ -3309,6 +3316,10 @@ function AppContent() {
               <span className="font-bold text-xs text-[#FBBF24]">{currentUser.coins}</span>
 
             </button>
+
+            <span className="flex items-center gap-1 rounded-full border border-amber-200/25 bg-amber-300/10 px-2.5 py-1.5 text-xs font-bold text-amber-100" title="Gold balansi">
+              <Trophy size={13} /> {currentUser.gold}
+            </span>
 
             {authUser?.app_metadata?.role === 'admin' && (
               <button
@@ -4247,6 +4258,23 @@ function AppContent() {
                 </section>
               )}
 
+              <button
+                type="button"
+                onClick={() => setActiveTab('detective')}
+                className="group w-full rounded-2xl border border-amber-300/25 bg-gradient-to-r from-amber-400/15 via-[#1D1729] to-yellow-500/10 p-5 text-left transition-all hover:-translate-y-0.5 hover:border-amber-200/50"
+              >
+                <span className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-300/15 text-amber-200"><Fingerprint size={22} /></span>
+                    <span>
+                      <span className="block font-black text-white">DETEKTIV — haftalik tergov</span>
+                      <span className="mt-1 block text-xs text-[#A7A0B5]">Dalillarni tahlil qiling va 500 Gold yuting</span>
+                    </span>
+                  </span>
+                  <ChevronRight className="shrink-0 text-amber-200 transition group-hover:translate-x-1" />
+                </span>
+              </button>
+
               {/* Main 3 Feature Cards */}
 
               <div className="space-y-3">
@@ -4394,6 +4422,21 @@ function AppContent() {
 
           )}
 
+          {!subView && activeTab === 'detective' && (
+            <Detective
+              supabase={supabase}
+              onReward={() => {
+                void fetchProfiles().then(profiles => {
+                  setUsers(profiles);
+                  const ownProfile = profiles.find(profile => profile.id === activeProfileId);
+                  if (ownProfile) setRegisteredProfile(ownProfile);
+                }).catch(error => {
+                  console.error('Could not refresh Gold balance after Detective reward:', error);
+                  showToast('Gold yutug‘i saqlandi, balansni yangilash uchun sahifani qayta yuklang.', 'error');
+                });
+              }}
+            />
+          )}
 
 
           {/* TAB 2: TESTLAR */}
@@ -4899,7 +4942,7 @@ function AppContent() {
 
 
 
-                <div className="grid grid-cols-2 gap-3 mt-5">
+                <div className="grid grid-cols-3 gap-3 mt-5">
 
                   <div className="bg-black/30 p-3.5 rounded-2xl border border-white/5">
 
@@ -4914,6 +4957,14 @@ function AppContent() {
                     <div className="text-xs text-[#A7A0B5]">ANONI COIN</div>
 
                     <div className="text-xl font-extrabold text-[#FBBF24] mt-0.5">{currentUser.coins}</div>
+
+                  </div>
+
+                  <div className="bg-black/30 p-3.5 rounded-2xl border border-amber-300/15">
+
+                    <div className="text-xs text-[#A7A0B5]">DETEKTIV GOLD</div>
+
+                    <div className="text-xl font-extrabold text-amber-200 mt-0.5">{currentUser.gold}</div>
 
                   </div>
 
@@ -4978,6 +5029,8 @@ function AppContent() {
               { id: 'testlar', label: 'Testlar', icon: FileText },
 
               { id: 'reyting', label: 'Reyting', icon: Trophy },
+
+              { id: 'detective', label: 'Detektiv', icon: Fingerprint },
 
               { id: 'challenge', label: 'Challenge', icon: Zap },
 
