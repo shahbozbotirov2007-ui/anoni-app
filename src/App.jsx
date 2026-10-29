@@ -288,6 +288,7 @@ const getUserLevelInfo = (xp, proMonths = 0, isTopRank = false) => {
 
 const TEST_MODE_ANNOUNCEMENT_END = new Date('2026-11-29T00:00:00+05:00').getTime();
 const TEST_MODE_ANNOUNCEMENT_ACTIVE = Date.now() < TEST_MODE_ANNOUNCEMENT_END;
+const TELEGRAM_CHANNEL_URL = 'https://t.me/anoni_uz';
 
 function TestModeAnnouncement() {
   const [visible, setVisible] = useState(TEST_MODE_ANNOUNCEMENT_ACTIVE);
@@ -386,6 +387,8 @@ function AppContent() {
 
   const [toast, setToast] = useState(null);
   const [dailyRewardModal, setDailyRewardModal] = useState(null);
+  const [telegramRewardStatus, setTelegramRewardStatus] = useState({ profileId: null, claimed: false, error: false, loading: true });
+  const [telegramRewardBusy, setTelegramRewardBusy] = useState(false);
   const [accountActionModal, setAccountActionModal] = useState(null);
   const [accountActionBusy, setAccountActionBusy] = useState(false);
   const [deleteUserModal, setDeleteUserModal] = useState(null);
@@ -764,6 +767,9 @@ function AppContent() {
   }, [realtimeUserId]);
 
   const activeProfileId = registeredProfile?.id;
+  const telegramRewardState = telegramRewardStatus.profileId === activeProfileId
+    ? telegramRewardStatus
+    : { profileId: activeProfileId, claimed: false, error: false, loading: true };
   const testCreationPauseLoading = Boolean(activeProfileId && testCreationStatus.profileId !== activeProfileId);
   const testCreationPauseError = testCreationStatus.profileId === activeProfileId && testCreationStatus.error;
   const testCreationPausedUntil = testCreationStatus.profileId === activeProfileId
@@ -771,6 +777,21 @@ function AppContent() {
     : null;
   const isTestCreationPaused = Boolean(testCreationPausedUntil && testCreationPausedUntil > clockNow);
   const testCreationUnavailable = !activeProfileId || testCreationPauseLoading || testCreationPauseError || isTestCreationPaused;
+  useEffect(() => {
+    if (!activeProfileId) return undefined;
+    let active = true;
+    supabase.rpc('has_claimed_telegram_join_reward').then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        console.error('Could not load Telegram reward status:', error);
+        setTelegramRewardStatus({ profileId: activeProfileId, claimed: false, error: true, loading: false });
+        return;
+      }
+      setTelegramRewardStatus({ profileId: activeProfileId, claimed: Boolean(data), error: false, loading: false });
+    });
+    return () => { active = false; };
+  }, [activeProfileId]);
+
   useEffect(() => {
     if (!activeProfileId) return undefined;
     let active = true;
@@ -848,6 +869,34 @@ function AppContent() {
         : Boolean(storedCurrentUser.isPro),
     username: '',
     avatar: avatarDataUrl
+  };
+  const claimTelegramJoinReward = async () => {
+    if (!activeProfileId || telegramRewardBusy) return;
+    setTelegramRewardBusy(true);
+    try {
+      const { data, error } = await supabase.rpc('claim_telegram_join_reward');
+      if (error) throw error;
+      setTelegramRewardStatus({ profileId: activeProfileId, claimed: true, error: false, loading: false });
+      if (data?.coins_awarded > 0) {
+        showToast('Telegram kanaliga qo‘shilganingiz uchun +500 Coin berildi!');
+      } else {
+        showToast('Bu mukofot avval olingan.');
+      }
+      try {
+        const profiles = await fetchProfiles();
+        setUsers(profiles);
+        const ownProfile = profiles.find(profile => profile.id === activeProfileId);
+        if (ownProfile) setRegisteredProfile(ownProfile);
+      } catch (refreshError) {
+        console.error('Could not refresh balance after Telegram reward:', refreshError);
+        showToast('Mukofot yozildi, balansni yangilash uchun sahifani qayta yuklang.', 'error');
+      }
+    } catch (error) {
+      console.error('Could not claim Telegram join reward:', error);
+      showToast(error.message || 'Telegram mukofotini olish muvaffaqiyatsiz tugadi.', 'error');
+    } finally {
+      setTelegramRewardBusy(false);
+    }
   };
   const isCurrentlyBanned = currentUser.bannedUntil
     ? Number(currentUser.bannedUntil) > Date.now()
@@ -4153,6 +4202,50 @@ function AppContent() {
               </section>
 
 
+              {!telegramRewardState.claimed && (
+                <section className="overflow-hidden rounded-2xl border border-sky-300/25 bg-gradient-to-r from-sky-500/15 via-[#1D1729] to-blue-500/10 p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-400/15 text-sky-200">
+                      <Send size={21} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-extrabold uppercase tracking-wider text-sky-200">500 COIN SOVG‘A</p>
+                      <h3 className="mt-1 text-lg font-black text-white">ANONI Telegram kanaliga qo‘shiling!</h3>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                        <a href={TELEGRAM_CHANNEL_URL} target="_blank" rel="noopener noreferrer" className="font-bold text-sky-200 underline underline-offset-2">
+                          @anoni_uz kanaliga kiring
+                        </a>, so‘ng pastdagi tugma orqali bir martalik 500 Coin mukofotini oling.
+                      </p>
+                      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                        “A’zo bo‘ldim” tugmasi o‘z tasdig‘ingiz asosida mukofotni beradi. Hozircha kanal a’zoligi bot orqali avtomatik tekshirilmaydi.
+                      </p>
+                      {telegramRewardState.error && (
+                        <p role="alert" className="mt-3 text-xs font-semibold text-rose-300">
+                          Mukofot holatini tekshirib bo‘lmadi. Sahifani yangilab qayta urinib ko‘ring.
+                        </p>
+                      )}
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <a
+                          href={TELEGRAM_CHANNEL_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200/20 bg-sky-300/10 px-4 py-3 text-sm font-bold text-sky-100 transition hover:bg-sky-300/20"
+                        >
+                          <Send size={16} /> Telegram kanaliga qo‘shilish
+                        </a>
+                        <button
+                          type="button"
+                          onClick={claimTelegramJoinReward}
+                          disabled={telegramRewardBusy || telegramRewardState.loading || telegramRewardState.error}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-extrabold text-[#07131B] transition hover:bg-sky-300 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          {telegramRewardBusy ? 'Mukofot olinmoqda...' : 'A’zo bo‘ldim — 500 Coin olish'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              )}
 
               {/* Main 3 Feature Cards */}
 
