@@ -29,3 +29,14 @@ Add these variables to the Vercel project's Production environment:
 - `GEMINI_MODEL` (optional; defaults to `gemini-2.0-flash`)
 
 Keep the service-role and Gemini keys server-only; never prefix them with `VITE_`. The receipt image is stored directly in the private Supabase Storage bucket before its path is sent to this API.
+
+### Connect Gemini AI Support
+
+1. Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. In Vercel, open the CRP Ticket project → **Settings → Environment Variables**.
+3. Add `GEMINI_API_KEY` with the key value and enable it for **Production** (and Preview/Development if needed). Do not use a `VITE_` prefix or put the key in frontend code.
+4. Optionally add `GEMINI_MODEL` (default: `gemini-2.0-flash`).
+5. Redeploy the Production deployment so the serverless API loads the new variable.
+6. Confirm `gemini_configured` is `true` at `/api/health`, then sign in to the site and send a message in **Support**.
+
+The support endpoint also requires `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` in Vercel. All four server variables must be present for authenticated support; never expose or share the service-role or Gemini key.

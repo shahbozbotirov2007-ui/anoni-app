@@ -32,6 +32,7 @@ supabase/
     202611050003_ticket_admin_event_purge.sql
     202611050004_admin_payment_realtime.sql
     202611050005_ticket_change_reservation.sql
+    202611060001_ticket_admin_seat_statuses.sql
 ```
 
 Historical, unreferenced source files remain outside the active `src/main.tsx` entry point. The active application and its alternate `src/main.jsx` entry both load the CRP Ticket app.
@@ -56,6 +57,7 @@ Administrators enter event and sales dates with separate calendar-date and 24-ho
 - `ticket_admin_create_event(p_event, p_invitation_seats)` creates the event and its complete seat inventory in one transaction. Invitation ranges are expanded and validated by the frontend, then every seat number is checked again by the function.
 - The new-event form accepts optional poster and artist images after the charity controls; images up to 30 MB are accepted, and files over 9 MB are resized/compressed in the browser to fit the 10 MB public `ticket-banners` bucket limit. Images of any aspect ratio are fitted without cropping in event cards and detail pages.
 - `ticket_admin_update_event(p_event_id, p_event, p_offline_seats)` updates event details and image URLs and atomically marks selected available seats as sold offline. It cannot change seats that are already reserved, sold online, or reserved for invitations.
+- `ticket_admin_set_seat_statuses(p_event_id, p_offline_seats, p_invitation_seats)` independently saves invitation and offline-sold seats without resubmitting or changing event price/details. It locks inventory rows and refuses to alter customer-reserved or online-sold seats.
 - `ticket_reserve_seat(p_seat_id)` locks the seat row, enforces sale dates and availability, creates a 10-minute reservation, and returns its order ID. Concurrent buyers cannot reserve the same seat.
 - `ticket_change_reservation(p_order_id, p_new_seat_id)` atomically cancels an unsubmitted reservation when the new seat is null, or moves it to another available seat while retaining the original expiration time. Only the reservation owner can call it; failed seat changes leave the original reservation intact.
 - `ticket_set_order_review_state(...)` is service-role-only. It attaches a private proof and holds the seat while AI/admin review is pending.

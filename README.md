@@ -13,7 +13,7 @@ See [docs/CRP-TICKET-ARCHITECTURE.md](docs/CRP-TICKET-ARCHITECTURE.md) for the s
 
 ## Local development
 
-1. Apply the CRP Ticket migrations in timestamp order to the connected Supabase project. New and existing ticket accounts receive a stable, unique six-digit user ID in `123-456` format. The migrations add event creation/editing, poster and artist images, offline-sold seat blocking, payment review, ticket expiry, admin-only event-data cleanup, realtime payment-order notifications, and atomic cancellation or replacement of a user's active seat reservation.
+1. Apply the CRP Ticket migrations in timestamp order to the connected Supabase project. New and existing ticket accounts receive a stable, unique six-digit user ID in `123-456` format. The migrations add event creation/editing, poster and artist images, offline-sold and invitation seat management, payment review, ticket expiry, admin-only event-data cleanup, realtime payment-order notifications, and atomic cancellation or replacement of a user's active seat reservation.
 2. In Supabase **Authentication → Providers**, enable **Anonymous Sign-Ins**. Phone Auth and an SMS provider are not required. Set the production site URL under **Authentication → URL Configuration**.
 3. Copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_TICKET_API_URL=http://localhost:8000`.
 4. Copy `backend/.env.example` to `backend/.env`, fill in the server-only Supabase and Gemini keys, and follow [backend/README.md](backend/README.md) to start the API. Gemini also powers the authenticated CRP Ticket Support chat.
