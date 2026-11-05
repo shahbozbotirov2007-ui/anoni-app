@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import Cropper, { type Area } from 'react-easy-crop';
 import { BadgeCheck, BellRing, CalendarPlus, Check, ChevronDown, CircleDollarSign, Crop, ImagePlus, LoaderCircle, LockKeyhole, Pencil, Phone, Plus, RefreshCw, Save, Search, ShieldAlert, TicketCheck, ToggleLeft, ToggleRight, Trash2, Upload, Users, X } from 'lucide-react';
@@ -306,6 +306,7 @@ function EventManager({ events, onRefresh }: { events: TicketEvent[]; onRefresh:
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState('');
   const [editingEventId, setEditingEventId] = useState('');
+  const [managingSeatsEventId, setManagingSeatsEventId] = useState('');
   const [error, setError] = useState('');
   async function toggleEvent(event: TicketEvent) {
     setBusyId(event.id);
@@ -332,11 +333,109 @@ function EventManager({ events, onRefresh }: { events: TicketEvent[]; onRefresh:
         <div className="admin-event-date">{formatEventDay(event.starts_at)}</div>
         <div className="admin-event-info"><strong>{event.title}</strong><span>{formatEventDate(event.starts_at)} · {event.location} · {formatMoney(event.ticket_price)}</span></div>
         <span className={`status-pill ${event.published ? 'status-approved' : 'status-draft'}`}>{event.published ? 'SOTUVDA' : 'YASHIRIN'}</span>
+        <button className="button button-outline button-small" onClick={() => setManagingSeatsEventId((current) => current === event.id ? '' : event.id)}>{managingSeatsEventId === event.id ? <X size={14} /> : <TicketCheck size={14} />}{managingSeatsEventId === event.id ? 'Yopish' : 'Joylar'}</button>
         <button className="button button-outline button-small" onClick={() => setEditingEventId((current) => current === event.id ? '' : event.id)}>{editingEventId === event.id ? <X size={14} /> : <Pencil size={14} />}{editingEventId === event.id ? 'Yopish' : 'Tahrirlash'}</button>
         <button className={`button ${event.published ? 'button-outline' : 'button-primary'} button-small`} disabled={busyId === event.id} onClick={() => void toggleEvent(event)}>{busyId === event.id ? '...' : event.published ? 'Yashirish' : 'E’lon qilish'}</button>
       </div>
+      {managingSeatsEventId === event.id && <SeatStatusManager event={event} />}
       {editingEventId === event.id && <EventEditor event={event} onCancel={() => setEditingEventId('')} onSaved={async () => { await onRefresh(); setEditingEventId(''); setMessage('Tadbir ma’lumotlari saqlandi.'); }} />}
     </div>)}</div>}
+  </section>;
+}
+
+function SeatStatusManager({ event }: { event: TicketEvent }) {
+  const [seats, setSeats] = useState<TicketSeat[]>([]);
+  const [offlineSeats, setOfflineSeats] = useState<number[]>([]);
+  const [invitationSeats, setInvitationSeats] = useState<number[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const loadSeats = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data, error: loadError } = await ticketSupabase.rpc('ticket_get_seats', { p_event_id: event.id });
+      if (loadError) throw loadError;
+      const loadedSeats = (data || []) as TicketSeat[];
+      setSeats(loadedSeats);
+      setOfflineSeats(loadedSeats.filter((seat) => seat.status === 'offline_sold').map((seat) => seat.seat_number));
+      setInvitationSeats(loadedSeats.filter((seat) => seat.status === 'invitation').map((seat) => seat.seat_number));
+      return true;
+    } catch (loadError) {
+      setError(`Joylar ro‘yxatini yuklab bo‘lmadi: ${loadError instanceof Error ? loadError.message : 'noma’lum xatolik'}`);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [event.id]);
+
+  useEffect(() => { void loadSeats(); }, [loadSeats]);
+
+  function toggleSeat(seat: TicketSeat, status: 'invitation' | 'offline_sold') {
+    if (status === 'invitation') {
+      if (seat.status !== 'available' && seat.status !== 'invitation') return;
+      setInvitationSeats((current) => current.includes(seat.seat_number)
+        ? current.filter((number) => number !== seat.seat_number)
+        : [...current, seat.seat_number].sort((a, b) => a - b));
+      return;
+    }
+    if (seat.status !== 'available' && seat.status !== 'offline_sold') return;
+    setOfflineSeats((current) => current.includes(seat.seat_number)
+      ? current.filter((number) => number !== seat.seat_number)
+      : [...current, seat.seat_number].sort((a, b) => a - b));
+  }
+
+  async function saveSeatStatuses() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const { error: saveError } = await ticketSupabase.rpc('ticket_admin_set_seat_statuses', {
+        p_event_id: event.id,
+        p_offline_seats: offlineSeats,
+        p_invitation_seats: invitationSeats,
+      });
+      if (saveError) throw saveError;
+      if (!await loadSeats()) throw new Error('Joylar saqlandi, lekin ularning holatini qayta yuklab bo‘lmadi.');
+      setNotice('Joylar holati saqlandi. Chipta narxi o‘zgartirilmadi.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Joylar holatini saqlab bo‘lmadi.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="seat-status-manager" aria-label={`${event.title} o‘rindiqlarini boshqarish`}>
+    <h4>{event.title} — o‘rindiqlarni boshqarish</h4>
+    <p className="field-hint">Joylarni band qilish uchun tanlang. Bu bo‘lim chipta narxiga ta’sir qilmaydi.</p>
+    {loading ? <p className="admin-empty">O‘rindiqlar yuklanmoqda...</p> : <>
+      <div className="seat-management-block">
+        <strong>Taklifnoma joylari</strong>
+        <p className="field-hint">Sotuvga chiqmaydi va sotilgan deb hisoblanmaydi.</p>
+        <div className="event-seat-grid">{seats.map((seat) => {
+          const selected = invitationSeats.includes(seat.seat_number);
+          const blocked = seat.status !== 'available' && seat.status !== 'invitation';
+          return <button type="button" className={`event-seat-choice ${selected ? 'selected invitation-selected' : ''}`} key={seat.id} disabled={blocked || busy} title={blocked ? (seat.status === 'reserved' ? 'Mijoz band qilgan' : 'Sotilgan joy') : selected ? 'Taklifnoma holatidan chiqarish' : 'Taklifnoma joyi deb belgilash'} onClick={() => toggleSeat(seat, 'invitation')}>{seat.seat_number}</button>;
+        })}</div>
+      </div>
+      <div className="seat-management-block">
+        <strong>Oflayn sotilgan joylar</strong>
+        <p className="field-hint">Sotuvdan yopiladi va sotilgan deb hisoblanadi.</p>
+        <div className="event-seat-grid">{seats.map((seat) => {
+          const selected = offlineSeats.includes(seat.seat_number);
+          const blocked = seat.status !== 'available' && seat.status !== 'offline_sold';
+          return <button type="button" className={`event-seat-choice ${selected ? 'selected' : ''}`} key={seat.id} disabled={blocked || busy} title={blocked ? (seat.status === 'invitation' ? 'Taklifnoma joyi' : seat.status === 'reserved' ? 'Mijoz band qilgan' : 'Onlayn sotilgan chipta') : selected ? 'Oflayn sotuvdan chiqarish' : 'Oflayn sotilgan deb belgilash'} onClick={() => toggleSeat(seat, 'offline_sold')}>{seat.seat_number}</button>;
+        })}</div>
+      </div>
+      <button type="button" className="button button-outline seat-status-save" onClick={() => void saveSeatStatuses()} disabled={busy || seats.length === 0}>
+        {busy ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
+        {busy ? 'Joylar saqlanmoqda...' : 'Joylar holatini saqlash'}
+      </button>
+    </>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {notice && <p className="form-success" role="status">{notice}</p>}
   </section>;
 }
 
@@ -360,29 +459,21 @@ function EventEditor({ event, onCancel, onSaved }: { event: TicketEvent; onCance
     ticketPrice: String(event.ticket_price),
     paymentCardNumber: event.payment_card_number,
   });
-  const [seats, setSeats] = useState<TicketSeat[]>([]);
   const [offlineSeats, setOfflineSeats] = useState<number[]>([]);
-  const [invitationSeats, setInvitationSeats] = useState<number[]>([]);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [artistFile, setArtistFile] = useState<File | null>(null);
   const [posterPreview, setPosterPreview] = useState('');
   const [artistPreview, setArtistPreview] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [seatStatusNotice, setSeatStatusNotice] = useState('');
   const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
     let active = true;
     ticketSupabase.rpc('ticket_get_seats', { p_event_id: event.id }).then(({ data, error: loadError }) => {
       if (!active) return;
-      if (loadError) setError(`O‘rindiqlarni yuklab bo‘lmadi: ${loadError.message}`);
-      else {
-        const loadedSeats = (data || []) as TicketSeat[];
-        setSeats(loadedSeats);
-        setOfflineSeats(loadedSeats.filter((seat) => seat.status === 'offline_sold').map((seat) => seat.seat_number));
-        setInvitationSeats(loadedSeats.filter((seat) => seat.status === 'invitation').map((seat) => seat.seat_number));
-      }
+      if (loadError) setError(`Tadbir joylarini tekshirib bo‘lmadi: ${loadError.message}`);
+      else setOfflineSeats(((data || []) as TicketSeat[]).filter((seat) => seat.status === 'offline_sold').map((seat) => seat.seat_number));
     });
     return () => { active = false; };
   }, [event.id]);
@@ -463,45 +554,6 @@ function EventEditor({ event, onCancel, onSaved }: { event: TicketEvent; onCance
     }
   }
 
-  function toggleOfflineSeat(seat: TicketSeat) {
-    if (seat.status !== 'available' && seat.status !== 'offline_sold') return;
-    setOfflineSeats((current) => current.includes(seat.seat_number)
-      ? current.filter((number) => number !== seat.seat_number)
-      : [...current, seat.seat_number].sort((a, b) => a - b));
-  }
-
-  function toggleInvitationSeat(seat: TicketSeat) {
-    if (seat.status !== 'available' && seat.status !== 'invitation') return;
-    setInvitationSeats((current) => current.includes(seat.seat_number)
-      ? current.filter((number) => number !== seat.seat_number)
-      : [...current, seat.seat_number].sort((a, b) => a - b));
-  }
-
-  async function saveSeatStatuses() {
-    setBusy(true);
-    setError('');
-    setSeatStatusNotice('');
-    try {
-      const { error: saveError } = await ticketSupabase.rpc('ticket_admin_set_seat_statuses', {
-        p_event_id: event.id,
-        p_offline_seats: offlineSeats,
-        p_invitation_seats: invitationSeats,
-      });
-      if (saveError) throw saveError;
-      const { data, error: loadError } = await ticketSupabase.rpc('ticket_get_seats', { p_event_id: event.id });
-      if (loadError) throw new Error(`Joylar saqlandi, lekin holatni qayta yuklab bo‘lmadi: ${loadError.message}`);
-      const loadedSeats = (data || []) as TicketSeat[];
-      setSeats(loadedSeats);
-      setOfflineSeats(loadedSeats.filter((seat) => seat.status === 'offline_sold').map((seat) => seat.seat_number));
-      setInvitationSeats(loadedSeats.filter((seat) => seat.status === 'invitation').map((seat) => seat.seat_number));
-      setSeatStatusNotice('Joylar holati saqlandi. Chipta narxi va tadbir ma’lumotlari o‘zgartirilmadi.');
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Joylar holatini saqlab bo‘lmadi.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return <form className="event-edit-panel" onSubmit={(formEvent) => void save(formEvent)}>
     <h4>Tadbir ma’lumotlarini tahrirlash</h4>
     <div className="form-grid">
@@ -516,38 +568,9 @@ function EventEditor({ event, onCancel, onSaved }: { event: TicketEvent; onCance
       <label className="field-span">To‘lov kartasi raqami<input inputMode="numeric" value={values.paymentCardNumber} onChange={(change) => update('paymentCardNumber', change.target.value)} minLength={16} maxLength={23} placeholder="8600 0000 0000 0000" required /></label>
       <label>Poster rasmi<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(change) => chooseImage('poster', change.target.files?.[0])} /><small className="field-hint">JPG, PNG yoki WEBP · 30 MB gacha; katta rasm avtomatik kichrayadi</small>{(posterPreview || event.poster_url) && <img className="event-image-preview" src={posterPreview || event.poster_url || ''} alt="Tadbir posteri" />}</label>
       <label>Ijrochi rasmi<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(change) => chooseImage('artist', change.target.files?.[0])} /><small className="field-hint">JPG, PNG yoki WEBP · 30 MB gacha; katta rasm avtomatik kichrayadi</small>{(artistPreview || event.artist_image_url) && <img className="event-image-preview" src={artistPreview || event.artist_image_url || ''} alt="Ijrochi rasmi" />}</label>
-      <div className="field-span">
-        <strong>O‘rindiqlarni boshqarish</strong>
-        <p className="field-hint">Joy holatini chipta narxini yoki tadbir ma’lumotlarini o‘zgartirmasdan boshqaring.</p>
-        {seats.length === 0 ? <p className="admin-empty">O‘rindiqlar yuklanmoqda...</p> : <>
-          <div className="seat-management-block">
-            <strong>Taklifnoma joylari</strong>
-            <p className="field-hint">Bu joylar sotuvga chiqmaydi va sotilgan deb hisoblanmaydi. Boshqa mijoz band qilgan yoki sotilgan joyni o‘zgartirib bo‘lmaydi.</p>
-            <div className="event-seat-grid">{seats.map((seat) => {
-              const selected = invitationSeats.includes(seat.seat_number);
-              const blocked = seat.status !== 'available' && seat.status !== 'invitation';
-              return <button type="button" className={`event-seat-choice ${selected ? 'selected invitation-selected' : ''}`} key={`invitation-${seat.id}`} disabled={blocked || busy} title={blocked ? (seat.status === 'reserved' ? 'Mijoz band qilgan' : 'Sotilgan yoki oflayn sotilgan chipta') : selected ? 'Taklifnoma holatidan chiqarish uchun bosing' : 'Taklifnoma joyi deb belgilash'} onClick={() => toggleInvitationSeat(seat)}>{seat.seat_number}</button>;
-            })}</div>
-          </div>
-          <div className="seat-management-block">
-            <strong>Oflayn sotilgan joylar</strong>
-            <p className="field-hint">Tanlangan joylar sotuvdan yopiladi va sotilgan deb hisoblanadi.</p>
-            <div className="event-seat-grid">{seats.map((seat) => {
-              const selected = offlineSeats.includes(seat.seat_number);
-              const blocked = seat.status !== 'available' && seat.status !== 'offline_sold';
-              return <button type="button" className={`event-seat-choice ${selected ? 'selected' : ''}`} key={`offline-${seat.id}`} disabled={blocked || busy} title={blocked ? (seat.status === 'invitation' ? 'Taklifnoma joyi' : seat.status === 'reserved' ? 'Mijoz band qilgan' : 'Onlayn sotilgan chipta') : selected ? 'Oflayn sotuvdan ozod qilish uchun bosing' : 'Oflayn sotilgan deb belgilash'} onClick={() => toggleOfflineSeat(seat)}>{seat.seat_number}</button>;
-            })}</div>
-          </div>
-          <button type="button" className="button button-outline seat-status-save" onClick={() => void saveSeatStatuses()} disabled={busy}>
-            {busy ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
-            {busy ? 'Joylar saqlanmoqda...' : 'Joylar holatini saqlash'}
-          </button>
-          {seatStatusNotice && <p className="form-success" role="status">{seatStatusNotice}</p>}
-        </>}
-      </div>
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="event-edit-actions"><button type="button" className="button button-outline" onClick={onCancel}>Bekor qilish</button><button type="submit" className="button button-primary" disabled={busy || seats.length === 0}>{busy ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}{busy ? 'Saqlanmoqda...' : 'Saqlash'}</button></div>
+    <div className="event-edit-actions"><button type="button" className="button button-outline" onClick={onCancel}>Bekor qilish</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}{busy ? 'Saqlanmoqda...' : 'Saqlash'}</button></div>
   </form>;
 }
 

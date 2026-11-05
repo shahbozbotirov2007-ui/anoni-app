@@ -134,6 +134,9 @@ a { color: inherit; }
 .event-seat-choice.selected { border-color: #e28a50; color: #8d4a20; background: #fff0e4; }
 .event-seat-choice.invitation-selected { border-color: #8c82e8; color: #5146aa; background: #efedff; }
 .event-seat-choice:disabled { color: #a7acb7; background: #f0f1f4; }
+.seat-status-manager { margin: 12px 0 18px; padding: 18px; border: 1px solid #dedaf8; border-radius: 13px; background: #f9f8ff; }
+.seat-status-manager h4 { margin: 0 0 6px; color: #33304e; font-size: 15px; }
+.seat-status-manager > .field-hint { margin: 0; }
 .seat-management-block { margin-top: 14px; padding: 13px; border: 1px solid #e8e9ef; border-radius: 11px; background: #fff; }
 .seat-management-block > strong { color: #41495b; font-size: 12px; }
 .seat-management-block .event-seat-grid { margin-top: 10px; }
