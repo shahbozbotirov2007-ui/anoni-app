@@ -1,43 +1,50 @@
-# ANONI
+# CRP Ticket
 
-ANONI is a React/Vite application using Supabase Auth and PostgreSQL for account profiles, balances, moderation status, shop ownership, and the global XP leaderboard.
+CRP Ticket is an Uzbek-language event ticket marketplace built with React, TypeScript, Tailwind CSS, Supabase, and FastAPI. The site uses device-persisted anonymous accounts with a name and a contact phone number (no SMS verification), transactional seat reservations, proof-of-payment uploads, Gemini-assisted receipt review with mandatory administrator approval, QR tickets, a ticket wallet, and role-protected event administration.
 
-## Supabase setup
+## Architecture
 
-1. Create a Supabase project and apply `supabase/migrations/202607150001_profiles_auth.sql` in the Supabase SQL Editor. For an existing project, also apply later migration files in timestamp order.
-2. In **Authentication → URL Configuration**, set the production site URL to `https://anoni-app.vercel.app`; add `http://localhost:5173` and the production URL to the redirect allow list.
-3. In **Authentication → Sign In / Providers**, enable **Anonymous Sign-Ins**. Participants then enter only a nickname and age; they do not need email or password.
-4. For local development, copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_GEMINI_API_KEY`. The publishable key is intended for browser use; never put a Supabase secret/service-role key in a `VITE_` variable.
-5. Add the `VITE_SUPABASE_*` variables and `VITE_GEMINI_API_KEY` in the Vercel project’s environment settings for Preview and Production, then redeploy. Gemini AI features require a valid Google AI Studio API key.
-6. For a recoverable admin login across devices, create a dedicated email/password user in **Authentication → Users**, then grant its email `app_metadata.role = admin` using the trusted SQL Editor:
+- **Frontend:** Vite + React/TypeScript. Supabase Auth and Row Level Security are used directly from the browser; the Supabase publishable key is safe for browser use.
+- **Database and storage:** PostgreSQL tables, security-definer RPCs, RLS policies, and two Storage buckets are created by `supabase/migrations/202611030001_crp_ticket_platform.sql`.
+- **API:** FastAPI validates a user's Supabase access token, checks each reservation, reads the receipt from private Storage, and calls Gemini from the server. The service-role and Gemini keys never go to the browser.
+- **Hosting:** Vercel serves the frontend and FastAPI serverless function on the same origin. Receipt images upload directly to private Supabase Storage, avoiding serverless request-size limits.
+
+See [docs/CRP-TICKET-ARCHITECTURE.md](docs/CRP-TICKET-ARCHITECTURE.md) for the schema, component tree, API contract, security boundaries, and deployment checklist.
+
+## Local development
+
+1. Apply the CRP Ticket migrations in timestamp order to the connected Supabase project. New and existing ticket accounts receive a stable, unique six-digit user ID in `123-456` format. The migrations add event creation/editing, poster and artist images, offline-sold seat blocking, payment review, ticket expiry, admin-only event-data cleanup, realtime payment-order notifications, and atomic cancellation or replacement of a user's active seat reservation.
+2. In Supabase **Authentication → Providers**, enable **Anonymous Sign-Ins**. Phone Auth and an SMS provider are not required. Set the production site URL under **Authentication → URL Configuration**.
+3. Copy `.env.example` to `.env.local` and set `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and `VITE_TICKET_API_URL=http://localhost:8000`.
+4. Copy `backend/.env.example` to `backend/.env`, fill in the server-only Supabase and Gemini keys, and follow [backend/README.md](backend/README.md) to start the API. Gemini also powers the authenticated CRP Ticket Support chat.
+5. Add the first administrator's role using the trusted Supabase SQL Editor:
 
    ```sql
-   update auth.users
-   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
-   where lower(email) = lower('your-admin-email@example.com');
+   update auth.users u
+   set raw_app_meta_data = coalesce(u.raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+   from public.ticket_profiles p
+   where p.user_id = u.id and p.user_code = '123-456';
    ```
 
-   Use a unique, strong password. The app’s login screen includes **Admin hisobim bilan kirish**. TOTP/MFA challenge enforcement is not implemented in the app yet, so do not treat enabling an MFA factor alone as protecting admin actions. Never use a nickname/age combination or client-side flag as administrator credentials; admin database actions independently verify the server-managed role.
+   The role is read from server-managed `app_metadata`; a browser-supplied flag cannot grant admin access.
+6. Run the frontend:
 
-The initial migration creates the profile-on-signup trigger, unique public IDs, row-level security policies, guarded reward/shop/admin functions, and the Realtime publication entry for profile changes. The admin visibility migration adds global leaderboard hiding and permanent PRO support. The test-creation pause migration disables new tests until 2026-11-03 18:00 Uzbekistan time while leaving existing tests available. The admin delete-account migration adds a guarded, irreversible user deletion action; it cannot delete the currently signed-in admin. Apply all migration files in timestamp order. Apply `supabase/migrations/202610290001_iq_test_and_battles.sql` for server-checked IQ tests, saved attempts, IQ battles, and the separate TOP-100 ranking, then apply `supabase/migrations/202610290002_private_profile_access_and_challenge_votes.sql` before deploying the client changes. Apply `supabase/migrations/202610290003_realtime_public_leaderboard.sql` to restore global live ranking updates without exposing private profile fields. The IQ migration can be rerun safely if SQL Editor reports that one of its tables already exists; existing question IDs are preserved and missing questions are inserted. The profile migration removes direct profile-table reads, so it must be applied before the updated client starts using its restricted profile RPC.
+   ```powershell
+   npm install
+   npm run dev
+   npm run typecheck
+   npm run lint
+   npm run build
+   ```
 
-Apply `supabase/migrations/202610290004_telegram_join_reward.sql` to enable the one-time 500 Coin Telegram channel reward. The site records the claim server-side per account, but this flow currently relies on the user's confirmation; it does not automatically verify Telegram membership.
+## Deployment
 
-Apply `supabase/migrations/202610290005_weekly_detective.sql` to add the separate Gold balance and secure weekly Detective investigations. Schedule approved cases from the admin panel; all scheduled times are interpreted in `Asia/Tashkent`. The public RPC only returns evidence unlocked by server time, accepts one Saturday answer per account, and awards Gold atomically. Past cases and answer statistics are available only in the admin panel, not in a public archive. Admins must add verifiable sources before scheduling a case.
+Keep the existing Vercel project and Supabase project connected. Add the server-only variables `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `GEMINI_API_KEY` to Vercel Production. Optionally set `GEMINI_MODEL`. Keep `VITE_TICKET_API_URL` unset in production so the frontend calls the same-origin Vercel function. Never add `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` to `VITE_` variables.
 
-## Current data boundaries
+The payment flow is manual P2P transfer: an administrator configures the receiving card on each event, and buyers upload an image receipt. Gemini reads the visible amount, transfer state, and receiver-card suffix to help prioritize review. **Every receipt requires an administrator's explicit approval before a ticket is created**; AI never approves payment or issues a ticket. This is an evidence check, not a payment-provider settlement or bank reconciliation.
 
-Account identity, age, public ID, XP, Coin and Gold balances, PRO/ban dates, owned shop status, completed IQ results, and Detective answers are cloud-backed. Private profile columns are available only through the authenticated app RPC for the current user or an admin; other users receive a restricted public profile shape. IQ question answers remain in the database and are returned only as a correctness result; the browser receives question text and choices, not the answer key. In-progress IQ attempts and battle results are tied to the authenticated profile. Detective answer keys and unreleased clues remain server-side until the permitted stage. Profile state refreshes through the authenticated app-data RPC and the current user's profile-change events. Daily login, daily test-creation XP, verified daily challenge votes/rewards, Detective Gold rewards, shop purchases, and admin updates are handled by database functions rather than direct browser updates.
+Charity allocation is recorded on approved ticket orders at the configured percentage; it does not automatically transfer money to a charity. Ticket QR codes open the server-side verification page. PostgreSQL serializes seat reservations and approval/rejection transactions and enforces unique live-seat, order, and ticket constraints. Tickets expire exactly 48 hours after the event's admin-entered end time; a database job marks them expired, removes them from the wallet/verification, and purges expired ticket rows after a 30-day audit window.
 
-Anonymous accounts persist in the same browser/device through the Supabase session. Nickname and age are not credentials: using the same nickname on another device creates a separate profile, and clearing browser data can make the original anonymous account unrecoverable. Do not sign out if you want to keep access to that anonymous account.
+## Supabase data reset
 
-Test content and attempts, avatar images, challenge voting totals, and other presentation-only progress are still browser-local. Test completion/author rewards are not issued as cloud balance changes until tests and attempts are migrated to the database. Paid Coin/PRO checkout is not connected to a payment provider and therefore does not grant purchased currency or subscriptions.
-
-## Run and validate
-
-```sh
-npm install
-npm run dev
-npm run lint
-npm run build
-```
+The connected production Supabase project was reset for CRP Ticket at the owner's request: legacy public ANONI tables and Auth accounts were removed before the CRP Ticket schema was applied. The legacy migration files remain in the repository, but their old tables are no longer part of the production project.

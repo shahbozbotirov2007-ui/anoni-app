@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .env
+.vercel
 .venv/
 .venv313/
 __pycache__/
@@ -27,3 +28,7 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+.env*
+.vercel_python_packages/
